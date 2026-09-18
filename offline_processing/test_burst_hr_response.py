@@ -131,8 +131,10 @@ class EventAnalysisTests(unittest.TestCase):
         obs.loc[at(65), "hr_bpm"] = 72
         result = self.analyze(obs=obs)
         event = result["events"].iloc[0]
-        self.assertEqual(list(RELATIVE_SECONDS), list(range(-19, 55)))
-        self.assertEqual(BASELINE.sum(), 14)
+        self.assertEqual(list(RELATIVE_SECONDS), list(range(-20, 50)))
+        self.assertEqual(BASELINE.sum(), 15)
+        self.assertEqual(result["report"]["baseline_seconds"], "[-20, -5): 15 1-Hz samples")
+        self.assertEqual(result["report"]["response_seconds"], "-20 through +49 inclusive")
         self.assertTrue(event.included)
         self.assertEqual(event.baseline_bpm, 60)
         self.assertAlmostEqual(event.hr_peak_increase_pct, 20)
@@ -141,13 +143,13 @@ class EventAnalysisTests(unittest.TestCase):
 
     def test_baseline_right_endpoint_excluded(self):
         obs = observations(np.arange(301))
-        obs.loc[at(55), "hr_bpm"] = 120  # -5 s must not enter the fourteen-sample baseline.
+        obs.loc[at(55), "hr_bpm"] = 120  # -5 s must not enter the fifteen-sample baseline.
         result = self.analyze(obs=obs)
         self.assertEqual(result["events"].baseline_bpm.iloc[0], 60)
 
     def test_decline_not_reported_as_positive_peak(self):
         obs = observations(np.arange(301))
-        obs.loc[at(np.arange(61, 115)), "hr_bpm"] = 54
+        obs.loc[at(np.arange(61, 110)), "hr_bpm"] = 54
         event = self.analyze(obs=obs)["events"].iloc[0]
         self.assertAlmostEqual(event.hr_post_max_pct, -10)
         self.assertEqual(event.hr_peak_increase_pct, 0)
@@ -185,13 +187,13 @@ class EventAnalysisTests(unittest.TestCase):
         self.assertEqual(result["summary"].included_bursts.sum(), 0)
 
     def test_full_epoch_guard_includes_extended_window_and_endpoint(self):
-        for second_onset in (110, 114):  # +50 and +54 s are inside the current epoch.
+        for second_onset in (105, 109):  # +45 and +49 s are inside the current epoch.
             events = bursts([60, second_onset])
             result = self.analyze(events=events, exclude_late_overlap=True)
             self.assertTrue(result["events"].other_movement_in_epoch.iloc[0])
             self.assertFalse(result["events"].included.iloc[0])
             self.assertIn("other_movement_in_hr_epoch", result["events"].exclusion_reason.iloc[0])
-        outside = self.analyze(events=bursts([60, 115]), exclude_late_overlap=True)
+        outside = self.analyze(events=bursts([60, 110]), exclude_late_overlap=True)
         self.assertFalse(outside["events"].other_movement_in_epoch.iloc[0])
         self.assertTrue(outside["events"].included.iloc[0])
 

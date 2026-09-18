@@ -5,6 +5,12 @@ The watch's on-screen firmware version is tracked separately.
 
 ## Unreleased
 
+- Use 30-second movement isolation plus full-epoch subsequent-movement exclusion
+  in the main HR-response notebook.
+- Adopt the updated -20 through +49 s HR epoch and 15-s baseline [-20, -5).
+  Derive report labels and plot bounds from the active analysis settings.
+- Update regression checks to reject a subsequent movement at +49 s and allow
+  one at +50 s when the 30-second gap rule is also satisfied.
 - Planned: Night Explorer FIT import and interactive event inspection.
 
 ## 0.1.0 - 2026-09-18

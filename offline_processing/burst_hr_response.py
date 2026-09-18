@@ -1,7 +1,7 @@
 """Movement-locked HR analysis from BBIs or FIT-recorded heart rate.
 
 Reference: https://www.nature.com/articles/s41598-025-29723-7
-Uses an adapted -19..+54 s epoch, a 14-s baseline [-19, -5), and
+Uses an adapted -20..+49 s epoch, a 15-s baseline [-20, -5), and
 post-onset HR maximum. Callback/record-timed HR is NOT ECG beat-timed HR. AUC
 tertiles, plausibility screening, and dropout guards are local adaptations.
 """
@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
 
-RELATIVE_SECONDS = np.arange(-19, 55)
-BASELINE = (RELATIVE_SECONDS >= -19) & (RELATIVE_SECONDS < -5)
+
+RELATIVE_SECONDS = np.arange(-20, 50)
+BASELINE = (RELATIVE_SECONDS >= -20) & (RELATIVE_SECONDS < -5)
 POST = RELATIVE_SECONDS > 0
 TERTILES = ["Low", "Medium", "High"]
 
@@ -343,7 +344,10 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
               "annotated_artifacts": len(annotations), "isolation_s": isolation_s,
               "exclude_late_overlap": exclude_late_overlap,
               "included_with_other_movement_in_epoch": int(events.loc[events.included, "other_movement_in_epoch"].sum()),
-              "baseline_seconds": "[-19, -5): fourteen 1-Hz samples", "response_seconds": "-19 through +54 inclusive",
+              "baseline_seconds": (
+                  f"[{RELATIVE_SECONDS[BASELINE][0]}, {RELATIVE_SECONDS[BASELINE][-1] + 1}): "
+                  f"{BASELINE.sum()} 1-Hz samples"),
+              "response_seconds": f"{RELATIVE_SECONDS[0]} through +{RELATIVE_SECONDS[-1]} inclusive",
               "notes": ["HR uses callback arrival times, not exact beat timestamps; latency is approximate.",
                         "No raw ECG/PPG morphology is available for artifact validation.",
                         "No artifact annotations means unreviewed, not artifact-free.",

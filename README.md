@@ -110,9 +110,10 @@ for recording controls, sideloading, and device checks.
   labels. The main notebook currently uses a **40 mg** burst threshold; the
   reorientation notebook uses **20 mg**. Neither threshold is validated here for
   this Garmin pipeline.
-- The current shared HR analysis uses **-19 through +54 s** around onset and a
-  **14-s baseline [-19, -5)**. These are adaptations of the reference paper's
-  shorter epoch and baseline. Notebook isolation settings also differ.
+- The current shared HR analysis uses **-20 through +49 s** around onset and a
+  **15-s baseline [-20, -5)**. These are adaptations of the reference paper's
+  shorter epoch and baseline. Both notebooks require 30-second gaps between
+  movements and exclude subsequent movements anywhere through +49 s.
 - BBI callback arrival times are approximate; they are not exact beat timestamps.
   Complete recovery of delivered intervals does not prove complete physiological
   beat coverage, normal-to-normal intervals, or a verified sensor source.
