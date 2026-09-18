@@ -1,3 +1,66 @@
+<p align="center">
+  <img src="docs/assets/hammock-logo.png" alt="Hammock logo" width="320">
+</p>
+
+**Consumer-grade wearables (Apple Watch, Whoop, Oura, Garmin, ...) describe sleep using categories such as awake, light sleep, deep sleep, and REM.**
+
+These categories come from **polysomnography (PSG)**, the clinical gold standard for studying sleep, which uses brain activity and other neurophysiological signals to define sleep stages. Wrist wearables do not directly measure these signals
+
+Why should we fit those signals (that, by the way, are not even recorded by PSG) into PSG-defined boxes?
+
+Instead of asking:
+
+> *Can a wearable reproduce PSG sleep stages?*
+
+this project asks:
+
+> **What can we measure directly and reliably from accelerometry and photoplethysmography during sleep?**
+
+## A different view of the night
+
+The framework separates the night into two physiological conditions:
+
+### Movement events
+
+Accelerometry identifies nocturnal movements and quantifies their timing, duration and intensity.
+
+Around each movement, cardiac signals can be used to characterize the associated heart rate (HR) response:
+
+**movement → HR response → peak → recovery**
+
+With raw PPG, this can potentially be extended to pulse-wave amplitude and other vascular features.
+
+During movements, HRV cannot be extracted reliably due to motion artifacts. Rather than forcing HRV estimates where signal quality is poor, the movement itself becomes the event of interest.
+
+### Quiet periods
+
+When the wrist is still and beat-to-beat intervals are reliable, the same signals can be used to characterize autonomic regulation:
+
+**quiet period → BBI → HRV**
+
+This allows the night to be described through both:
+
+**Motor history** — when and how the body moved
+
+**Cardiac history** — autonomic state during quiet periods and cardiovascular responses to movement
+
+## From sleep staging to nocturnal phenotyping
+
+The goal is not to replicate PSG on the wrist.
+
+The goal to extract physiological metrics that can be actually measured by wrist-wearables:
+
+- movement burden and intensity
+- cardiovascular reactivity to movement
+- response and recovery dynamics
+- quiet-period HRV
+- motor–cardiac coupling
+- within-person changes over time
+
+Together, these signals may define **new nocturnal phenotypes** designed for continuous, real-world monitoring rather than for reproducing laboratory sleep staging.
+
+---
+
 # OvernightAccelBbi
 
 **Overnight movement and cardiac analysis with a Garmin watch.**
