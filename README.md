@@ -16,6 +16,54 @@ this project asks:
 
 > **What can we measure directly and reliably from accelerometry and photoplethysmography during sleep?**
 
+## Two ways to describe the night
+
+```mermaid
+flowchart LR
+    subgraph staging["Sleep-stage classification"]
+        direction TB
+        signals["ACC + PPG"] --> features["Feature extraction"]
+        features --> model["Sleep-stage model"]
+        model --> wake["Wake"]
+        model --> nrem["NREM"]
+        model --> rem["REM"]
+    end
+
+    subgraph hammock["Hammock: nocturnal phenotyping"]
+        direction TB
+        night["NIGHT"] --> movement["MOVEMENT EVENTS"]
+        night --> quiet["QUIET PERIODS"]
+        movement --> event["ACC defines the event"]
+        quiet --> stillness["ACC confirms stillness"]
+        event --> response["HR response<br/>PWA response (with raw PPG)<br/>Recovery<br/>Latency"]
+        stillness --> bbi["Reliable BBI"]
+        bbi --> hrv["HRV"]
+        response ---> history["Physiological history"]
+        hrv --> history
+        history --> motor["MOTOR HISTORY"]
+        history --> cardiac["CARDIAC HISTORY"]
+        motor --> phenotype["NOCTURNAL PHENOTYPE"]
+        cardiac --> phenotype
+    end
+
+    staging ~~~ hammock
+
+    classDef stage fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef movementBranch fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef quietBranch fill:#ccfbf1,stroke:#0d9488,color:#134e4a
+    classDef shared fill:#082f49,stroke:#38bdf8,color:#ffffff
+    class signals,features,model,wake,nrem,rem stage
+    class movement,event,response,motor movementBranch
+    class quiet,stillness,bbi,hrv,cardiac quietBranch
+    class night,history,phenotype shared
+    style staging fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    style hammock fill:#f0fdfa,stroke:#0d9488,color:#134e4a
+```
+
+ACC = accelerometry; PPG = photoplethysmography; BBI = beat-to-beat interval;
+HRV = heart rate variability; PWA = pulse-wave amplitude. PWA responses are a
+potential extension requiring raw PPG, which the current Garmin recorder does not collect.
+
 ## A different view of the night
 
 The framework separates the night into two physiological conditions:
