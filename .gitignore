@@ -1,0 +1,53 @@
+# Local recordings, health data, and generated analysis
+offline_processing/data/
+offline_processing/outputs/
+*.fit
+*.FIT
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.parquet
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Private configuration, credentials, and local backups
+.local/
+*.local.json
+.env
+.env.*
+!.env.example
+developer_key*
+*.pem
+*.key
+*.der
+*.p12
+*.pfx
+
+# Build output and environments
+bin/
+build/
+dist/
+*.prg
+*.iq
+*.debug.xml
+.deps/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

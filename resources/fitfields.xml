@@ -1,0 +1,16 @@
+<resources xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <fitContributions>
+        <fitField id="0" displayInChart="false" sortOrder="0" precision="0" dataLabel="@Strings.fit_bbi_count_label" unitLabel="@Strings.fit_units_count" />
+        <fitField id="1" displayInChart="true" sortOrder="1" precision="0" chartTitle="@Strings.fit_bbi_latest_label" dataLabel="@Strings.fit_bbi_latest_label" unitLabel="@Strings.fit_units_ms" fillColor="#00A6FF" />
+        <fitField id="2" displayInChart="false" sortOrder="2" precision="0" dataLabel="@Strings.fit_bbi_1_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="3" displayInChart="false" sortOrder="3" precision="0" dataLabel="@Strings.fit_bbi_2_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="4" displayInChart="false" sortOrder="4" precision="0" dataLabel="@Strings.fit_bbi_3_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="5" displayInChart="false" sortOrder="5" precision="0" dataLabel="@Strings.fit_bbi_4_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="6" displayInChart="false" sortOrder="6" precision="0" dataLabel="@Strings.fit_bbi_5_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="7" displayInChart="false" sortOrder="7" precision="0" dataLabel="@Strings.fit_bbi_6_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="8" displayInChart="false" sortOrder="8" precision="0" dataLabel="@Strings.fit_bbi_7_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="9" displayInChart="false" sortOrder="9" precision="0" dataLabel="@Strings.fit_bbi_8_label" unitLabel="@Strings.fit_units_ms" />
+        <fitField id="10" displayInChart="false" sortOrder="10" precision="0" dataLabel="@Strings.fit_accel_samples_label" unitLabel="@Strings.fit_units_samples" />
+        <fitField id="11" displayInChart="false" sortOrder="11" precision="0" dataLabel="@Strings.fit_bbi_total_label" unitLabel="@Strings.fit_units_count" />
+    </fitContributions>
+</resources>

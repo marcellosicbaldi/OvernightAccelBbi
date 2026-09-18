@@ -1,0 +1,24 @@
+<strings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <string id="AppName">OvernightAccelBbi</string>
+
+    <string id="prompt">START records</string>
+
+    <string id="menu_label_1">Start/Stop</string>
+    <string id="menu_label_2">Save on Back</string>
+
+    <string id="fit_bbi_count_label">BBI Count</string>
+    <string id="fit_bbi_latest_label">Latest BBI</string>
+    <string id="fit_bbi_1_label">BBI 1</string>
+    <string id="fit_bbi_2_label">BBI 2</string>
+    <string id="fit_bbi_3_label">BBI 3</string>
+    <string id="fit_bbi_4_label">BBI 4</string>
+    <string id="fit_bbi_5_label">BBI 5</string>
+    <string id="fit_bbi_6_label">BBI 6</string>
+    <string id="fit_bbi_7_label">BBI 7</string>
+    <string id="fit_bbi_8_label">BBI 8</string>
+    <string id="fit_accel_samples_label">Accel Samples</string>
+    <string id="fit_bbi_total_label">Total BBI</string>
+    <string id="fit_units_ms">ms</string>
+    <string id="fit_units_count">count</string>
+    <string id="fit_units_samples">samples</string>
+</strings>

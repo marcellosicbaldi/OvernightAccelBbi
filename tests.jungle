@@ -1,0 +1,2 @@
+# Override production exclusions only when explicitly building unit tests.
+base.excludeAnnotations = productionOnly
