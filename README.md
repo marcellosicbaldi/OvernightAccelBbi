@@ -22,7 +22,7 @@ analysis modules/notebooks. The interactive **Night Explorer** is the next miles
 | Data recovery | Numbered BBI snapshot decoding, sequence-gap detection, final-session recovery, and legacy-format identification |
 | Movement analysis | Acceleration preprocessing, burst detection, duration, peak-to-peak amplitude, and movement AUC |
 | Cardiac responses | HR epochs aligned to movement onset, baseline normalization, intensity groups, and explicit exclusions |
-| Quiet-period HRV | RMSSD and exploratory PIP in screened windows between movement bursts |
+| Quiet-period HRV | GP interval cleaning and variable windows; mean HR, RMSSD, SDNN, and exploratory PIP with repair flags and quality screens |
 | Wrist reorientation | Stable changes in wrist gravity direction and descriptive comparisons at similar movement AUC |
 | Sleep diary | Timezone-aware diary matching and lights-off-to-wakeup cropping |
 
@@ -75,6 +75,12 @@ python -m jupyterlab
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.
 
+The main notebook uses the adapted **GP_pipeline** HRV workflow: quiet segments
+of 1-5 minutes, 5-minute windows with 1-minute steps for longer segments,
+single-pass artifact classification, and linear interval cleaning. Raw BBIs,
+repairs, and excluded windows remain inspectable. See
+[HRV method, defaults, and provenance](docs/HRV_PIPELINE.md) for the Garmin adaptations.
+
 Personal FIT files, diaries, saved notebook outputs, and derived health data are
 not distributed. Running a full notebook requires your own compatible recording;
 the regression tests use synthetic inputs and need no personal dataset.
@@ -117,8 +123,11 @@ for recording controls, sideloading, and device checks.
 - BBI callback arrival times are approximate; they are not exact beat timestamps.
   Complete recovery of delivered intervals does not prove complete physiological
   beat coverage, normal-to-normal intervals, or a verified sensor source.
-- RMSSD/PIP quality screens are exploratory. PIP uses the implemented tie rule,
-  which counts zero successive differences; quantization can affect it.
+- HRV cleaning and quality screens are exploratory for Garmin BBIs. GP defaults
+  ignore movements shorter than 2 s when forming quiet periods and impose no
+  repair-fraction cutoff; inspect the reported repairs. Window durations vary
+  and overlapping windows are not independent. PIP counts zero successive
+  differences; quantization and interpolation can affect it.
 - Wrist reorientation is not whole-body sleeping position. Movement-free periods
   are not necessarily sleep. The pipeline does not diagnose disorders or classify
   sleep stages.

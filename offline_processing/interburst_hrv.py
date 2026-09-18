@@ -3,6 +3,10 @@
 Window assignment uses callback ARRIVAL times, not exact beat times. Sequence
 numbers describe delivered intervals, not necessarily all physiological beats.
 Bounds screening cannot establish normal-to-normal (NN) intervals or source.
+
+This is the previous strict, uncorrected HRV implementation, retained for
+reference and regression checks. The main notebook now uses gp_hrv.py, which
+shares this module's input validation, quiet-segment helper, and PIP formula.
 """
 
 import numpy as np

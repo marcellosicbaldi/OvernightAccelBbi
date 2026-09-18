@@ -5,6 +5,11 @@ The watch's on-screen firmware version is tracked separately.
 
 ## Unreleased
 
+- Adapt the supplied GP_pipeline HRV workflow to Garmin BBIs in the main notebook:
+  1-5 minute quiet-period windows, 1-minute steps, single-pass artifact masking
+  and linear cleaning, plus mean HR, RMSSD, SDNN, and PIP.
+- Preserve raw intervals and repair flags, prevent cleaning across delivery gaps,
+  retain window exclusions, and document GP provenance and Garmin-specific changes.
 - Use 30-second movement isolation plus full-epoch subsequent-movement exclusion
   in the main HR-response notebook.
 - Adopt the updated -20 through +49 s HR epoch and 15-s baseline [-20, -5).
