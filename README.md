@@ -20,7 +20,7 @@ this project asks:
 
 ```mermaid
 flowchart LR
-    subgraph staging["Sleep-stage classification"]
+    subgraph staging["Standard wearable sleep assessment"]
         direction TB
         signals["ACC + PPG"] --> features["Feature extraction"]
         features --> model["Sleep-stage model"]
@@ -70,15 +70,11 @@ The framework separates the night into two physiological conditions:
 
 ### Movement events
 
-Accelerometry identifies nocturnal movements and quantifies their timing, duration and intensity.
-
-Around each movement, cardiac signals can be used to characterize the associated heart rate (HR) response:
+Accelerometry identifies nocturnal movements and quantifies their timing, duration and intensity. Around each movement, cardiac signals can be used to characterize the associated heart rate (HR) response:
 
 **movement → HR response → peak → recovery**
 
-With raw PPG, this can potentially be extended to pulse-wave amplitude and other vascular features.
-
-During movements, HRV cannot be extracted reliably due to motion artifacts. Rather than forcing HRV estimates where signal quality is poor, the movement itself becomes the event of interest.
+With raw PPG, this can potentially be extended to pulse-wave amplitude and other vascular features. During movements, HRV cannot be extracted reliably due to motion artifacts. Rather than forcing HRV estimates where signal quality is poor, the movement itself becomes the event of interest.
 
 ### Quiet periods
 
@@ -94,9 +90,7 @@ This allows the night to be described through both:
 
 ## From sleep staging to nocturnal phenotyping
 
-The goal is not to replicate PSG on the wrist.
-
-The goal to extract physiological metrics that can be actually measured by wrist-wearables:
+The goal is not to replicate PSG on the wrist. The goal to extract physiological metrics that can be actually measured by wrist-wearables:
 
 - movement burden and intensity
 - cardiovascular reactivity to movement
