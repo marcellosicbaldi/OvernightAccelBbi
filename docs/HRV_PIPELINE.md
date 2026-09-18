@@ -17,7 +17,9 @@ and unchanged by this adaptation.
    duration policy: shorter movements remain inside the resulting quiet periods.
    Set `HRV_MIN_BURST_DURATION_SECONDS=0` to retain them too.
 3. Split each quiet segment at a missing sequence number or a callback gap over
-   **3 seconds**. Classify and clean each resulting delivery run separately.
+   **5 seconds** with the notebook's `HRV_MAX_CALLBACK_GAP_SECONDS` setting.
+   Classify and clean each resulting delivery run separately. Direct calls to
+   `gp_hrv.interburst_hrv` retain a 3-second default unless overridden.
 4. Apply GP's interval-based artifact classifier **once**, with intervals in
    seconds. It flags `ectopic`, `missed`, `extra`, and `longshort` indices. These
    are algorithm categories, not clinical diagnoses. Mask those intervals and
@@ -55,7 +57,8 @@ this definition. The formula is preserved rather than silently redefined.
 
 Each window requires **at least 30 usable intervals**, no unresolved invalid
 values, no missing sequence numbers, no callback or boundary silence over
-3 seconds, and a sum of cleaned BBIs within **90-110%** of its wall-clock duration.
+the configured limit (5 seconds in the notebook), and a sum of cleaned BBIs within
+**90-110%** of its wall-clock duration.
 The last check screens timing consistency; it does not establish physiological
 beat coverage. These delivery safeguards are additions for the Garmin data.
 
@@ -101,8 +104,10 @@ The function returns:
 - `report`: active settings, counts, and interpretation notes.
 
 The notebook plots RMSSD/SDNN, mean HR, PIP, and raw/cleaned BBIs. Times remain UTC
-in tables and use `LOCAL_TZ` in plots. Its optional export cell writes these tables
-and the settings to the ignored `offline_processing/outputs/` directory.
+in tables and use `LOCAL_TZ` in plots. Set `SAVE_PARQUET=True` in the optional
+export cell to write these tables as Parquet files and the settings as JSON to
+the ignored `offline_processing/outputs/` directory. Parquet export uses the
+`pyarrow` dependency listed in the analysis requirements.
 
 The previous strict, uncorrected implementation remains in
 [interburst_hrv.py](../offline_processing/interburst_hrv.py) for reference and

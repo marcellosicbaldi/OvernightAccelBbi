@@ -137,6 +137,24 @@ class GpHrvTests(unittest.TestCase):
         self.assertEqual(result["intervals"].delivery_run_id.nunique(), 2)
         self.assertIn("callback_gap_or_edge_silence", result["windows"].exclusion_reason.iloc[0])
 
+    def test_five_second_callback_limit_accepts_boundary_and_rejects_longer_gaps(self):
+        for batch_seconds in (5, 6):
+            with self.subTest(batch_seconds=batch_seconds):
+                rows = make_rows(120)
+                for i, row in enumerate(rows):
+                    row["bbi_ms"] = 1000
+                    row["callback_time_utc_approx"] = at(i // batch_seconds * batch_seconds).isoformat()
+                result = self.compute(rows=rows, end=120, max_callback_gap_s=5)
+                window = result["windows"].iloc[0]
+                self.assertEqual(window.max_callback_gap_s, batch_seconds)
+                if batch_seconds == 5:
+                    self.assertEqual(result["intervals"].delivery_run_id.nunique(), 1)
+                    self.assertTrue(window.included)
+                else:
+                    self.assertGreater(result["intervals"].delivery_run_id.nunique(), 1)
+                    self.assertFalse(window.included)
+                    self.assertIn("callback_gap_or_edge_silence", window.exclusion_reason)
+
     def test_same_callback_intervals_are_individual_and_ordered(self):
         rows = make_rows(120)
         for i, row in enumerate(rows):
