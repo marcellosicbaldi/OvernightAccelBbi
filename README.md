@@ -10,9 +10,9 @@
 
 **Consumer-grade wearables (Apple Watch, Whoop, Oura, Garmin, ...) describe sleep using categories such as awake, light sleep, deep sleep, and REM.**
 
-These categories come from **polysomnography (PSG)**, the clinical gold standard for studying sleep, which uses brain activity and other neurophysiological signals to define sleep stages. Wrist wearables do not directly measure these signals
+These categories come from **polysomnography (PSG)**, the clinical gold standard for studying sleep, which uses brain activity and other neurophysiological signals to define sleep stages. But wrist wearables do not directly measure these signals.
 
-Why should we fit those signals (that, by the way, are not even recorded by PSG) into PSG-defined boxes?
+So, why should we fit those signals (that, by the way, are not even recorded by PSG) into PSG-defined boxes?
 
 Instead of asking:
 
