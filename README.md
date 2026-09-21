@@ -3,10 +3,10 @@
 </p
 
 
-# Hammock
-
 [![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
 [![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
+
+# Hammock
 
 **Consumer-grade wearables (Apple Watch, Whoop, Oura, Garmin, ...) describe sleep using categories such as awake, light sleep, deep sleep, and REM.**
 
