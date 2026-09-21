@@ -103,46 +103,12 @@ Together, these signals may define **new nocturnal phenotypes** designed for con
 
 ---
 
-# OvernightAccelBbi
-
-**Overnight movement and cardiac analysis with a Garmin watch.**
-
-[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
-[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
-
-A Connect IQ recorder and Python analysis toolkit for exploring wrist movement,
-heart-rate responses around movements, and beat-to-beat variability during quiet
-periods. The project connects wearable acquisition, signal processing, quality
-assessment, and reproducible analysis in one workflow.
-
-**Current status:** research prototype with a watch recorder and working offline
-analysis modules/notebooks. The interactive **Night Explorer** is the next milestone:
-*import a night, inspect its events*. A web or mobile application is not included yet.
-
-## What it does
-
-| Component | Available functionality |
-| --- | --- |
-| Watch recorder | Native XYZ accelerometry and Garmin-delivered beat-to-beat intervals (BBIs), saved in FIT files |
-| Data recovery | Numbered BBI snapshot decoding, sequence-gap detection, final-session recovery, and legacy-format identification |
-| Movement analysis | Acceleration preprocessing, burst detection, duration, peak-to-peak amplitude, and movement AUC |
-| Cardiac responses | HR epochs aligned to movement onset, baseline normalization, intensity groups, and explicit exclusions |
-| Quiet-period HRV | GP interval cleaning and variable windows; mean HR, RMSSD, SDNN, and exploratory PIP with repair flags and quality screens |
-| Wrist reorientation | Stable changes in wrist gravity direction and descriptive comparisons at similar movement AUC |
-| Sleep diary | Timezone-aware diary matching and lights-off-to-wakeup cropping |
-
-```mermaid
-flowchart LR
-    A[Garmin watch] --> B[Local FIT recording]
-    B --> C[Decode and check quality]
-    D[Sleep diary] --> C
-    C --> E[Movement events]
-    E --> F[HR responses and quiet-period HRV]
-    F --> G[Notebook inspection and exports]
-    G -. planned .-> H[Night Explorer interface]
 ```
 
 ## Get started with the analysis
+
+[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
+[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
 
 Use **Python 3.12**. From a terminal:
 
