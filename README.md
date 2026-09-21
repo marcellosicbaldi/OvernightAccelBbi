@@ -1,6 +1,10 @@
 <p align="center">
   <img src="docs/assets/hammock-logo.png" alt="Hammock logo" width="320">
-</p>
+</p
+
+# Hammock
+[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
+[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
 
 **Consumer-grade wearables (Apple Watch, Whoop, Oura, Garmin, ...) describe sleep using categories such as awake, light sleep, deep sleep, and REM.**
 
@@ -106,9 +110,6 @@ Together, these signals may define **new nocturnal phenotypes** designed for con
 
 
 ## Get started with the analysis
-
-[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
-[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
 
 Use **Python 3.12**. From a terminal:
 
