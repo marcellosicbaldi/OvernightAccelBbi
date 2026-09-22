@@ -136,13 +136,15 @@ analysis modules/notebooks. The interactive **Night Explorer** is the next miles
 | Quiet-period HRV | GP interval cleaning and variable windows; mean HR, RMSSD, SDNN, and exploratory PIP with repair flags and quality screens |
 | Wrist reorientation | Stable changes in wrist gravity direction and descriptive comparisons at similar movement AUC |
 | Sleep diary | Timezone-aware diary matching and lights-off-to-wakeup cropping |
+| Sleep/wake selection | VH2015 z-angle wake episodes within the diary crop; whole-night, sleep-only, or wake-only burst and cardiac analysis |
 
 ```mermaid
 flowchart LR
     A[Garmin watch] --> B[Local FIT recording]
     B --> C[Decode and check quality]
     D[Sleep diary] --> C
-    C --> E[Movement events]
+    C --> S[VH2015 and analysis selection]
+    S --> E[Movement events]
     E --> F[HR responses and quiet-period HRV]
     F --> G[Notebook inspection and exports]
     G -. planned .-> H[Night Explorer interface]
@@ -219,6 +221,13 @@ binaries. See [build, installation, and FIT schema documentation](docs/WATCH_APP
 for recording controls, sideloading, and device checks.
 
 ## Interpretation and current limits
+
+The main notebook runs VH2015 after diary cropping and before burst detection.
+Set `ANALYSIS_WINDOW` to `"whole_spt"` (the entire diary crop, default),
+`"sleep_only"`, or `"wake_only"`, and `MIN_WAKE_EPISODE_SECONDS` to `None`
+(default, retain every wake episode) or a minimum duration in seconds.
+Disjoint selected intervals stay separate for burst filtering, HR interpolation
+and response bounds, and GP HRV. See [VH2015 method and outputs](docs/VH2015_WAKE.md).
 
 - SensorLogger controls native FIT acceleration sampling; the 25 Hz callback
   request is separate. Approximately 100 Hz has been observed in local recordings,

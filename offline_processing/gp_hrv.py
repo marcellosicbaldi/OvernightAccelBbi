@@ -11,6 +11,7 @@ import pandas as pd
 
 from gp_hrv_artifacts import _find_artifacts
 from interburst_hrv import burst_free_segments, compute_HRF, prepare_bbi_intervals
+from analysis_windows import interval_ids, validate_intervals
 
 
 ARTIFACT_CLASSES = ("ectopic", "missed", "extra", "longshort")
@@ -76,7 +77,7 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
                   min_burst_duration_s=2.0, post_burst_guard_s=1.0,
                   min_beats=30, bbi_limits_ms=(300.0, 2000.0),
                   max_callback_gap_s=3.0, duration_fraction_limits=(0.9, 1.1),
-                  max_interpolated_fraction=1.0):
+                  max_interpolated_fraction=1.0, analysis_intervals=None):
     """Return intervals, GP quiet segments, variable windows, and provenance.
 
     GP defaults: ignore bursts <2 s for HRV segmentation, add 1 s after retained
@@ -90,6 +91,8 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
     crosses sequence holes or long callback gaps. Same-callback BBIs stay distinct.
     GP has no repaired-fraction rejection; the default 1.0 retains that behavior
     while exposing raw/artifact/repaired counts and a configurable stricter limit.
+    Optional analysis_intervals restrict all BBIs, cleaning and quiet-window
+    placement to separate [start, end) portions of the recording.
     """
     positive = (min_window_s, max_window_s, step_s, max_callback_gap_s)
     if not all(np.isfinite(x) and x > 0 for x in positive):
@@ -107,16 +110,45 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
         raise ValueError("max_interpolated_fraction must be between 0 and 1")
 
     intervals = prepare_bbi_intervals(rows, bbi_limits_ms)
+    analysis = validate_intervals(analysis_intervals, recording_start, recording_end)
+    if analysis_intervals is not None:
+        selected_ids = interval_ids(intervals.callback_time_utc_approx, analysis)
+        intervals = intervals.loc[selected_ids >= 0].reset_index(drop=True)
     # Validate all supplied bursts, including ones the GP duration policy ignores.
     burst_free_segments(bursts, recording_start, recording_end)
     used_bursts = bursts[["start", "end"]].copy()
     for name in ("start", "end"):
         used_bursts[name] = pd.to_datetime(used_bursts[name], utc=True)
+    if analysis_intervals is not None:
+        selected_ids = interval_ids(used_bursts.start, analysis)
+        used_bursts = used_bursts.loc[selected_ids >= 0].copy()
+        selected_ids = selected_ids[selected_ids >= 0]
+        used_bursts["end"] = [min(end, analysis.end.iloc[i])
+                              for end, i in zip(used_bursts.end, selected_ids)]
+        used_bursts["end"] = pd.to_datetime(used_bursts.end, utc=True)
     retained = (used_bursts.end - used_bursts.start).dt.total_seconds() >= min_burst_duration_s
     ignored_count = int((~retained).sum())
     used_bursts = used_bursts.loc[retained].copy()
     used_bursts["end"] += pd.Timedelta(seconds=post_burst_guard_s)
-    segments = burst_free_segments(used_bursts, recording_start, recording_end)
+    if analysis_intervals is not None:
+        selected_ids = interval_ids(used_bursts.start, analysis)
+        used_bursts["end"] = pd.to_datetime(
+            [min(end, analysis.end.iloc[i]) for end, i in zip(used_bursts.end, selected_ids)], utc=True)
+    segment_parts = []
+    for interval_id, interval in analysis.iterrows():
+        local_bursts = used_bursts
+        if analysis_intervals is not None:
+            local_bursts = used_bursts.loc[(used_bursts.start >= interval.start)
+                                          & (used_bursts.start < interval.end)]
+        part = burst_free_segments(local_bursts, interval.start, interval.end)
+        part["analysis_interval_id"] = interval_id
+        segment_parts.append(part)
+    segments = (pd.concat(segment_parts, ignore_index=True) if segment_parts else
+                pd.DataFrame({"start": pd.Series(dtype="datetime64[ns, UTC]"),
+                              "end": pd.Series(dtype="datetime64[ns, UTC]"),
+                              "duration_s": pd.Series(dtype=float),
+                              "analysis_interval_id": pd.Series(dtype=int)}))
+    segments.index.name = "segment_id"
 
     intervals["segment_id"] = -1
     intervals["delivery_run_id"] = -1
@@ -212,6 +244,8 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
               "duration_fraction_limits": list(duration_fraction_limits),
               "max_interpolated_fraction": max_interpolated_fraction,
               "n_artifacts": int(intervals.artifact.sum()), "n_interpolated": int(intervals.interpolated.sum()),
+              "analysis_intervals": [[row.start.isoformat(), row.end.isoformat()]
+                                     for row in analysis.itertuples()],
               "window_bounds": "[start, end)", "timing": "callback arrival proxy, not beat timestamps",
               "cleaning": "single-pass GP classifier; linear interval-order interpolation within delivery runs",
               "notes": ["Short bursts below the configured duration remain inside GP quiet periods.",
