@@ -44,3 +44,59 @@ def select_observations(observations, intervals):
     if len(selected):
         selected["break_before"] = selected.break_before.to_numpy(dtype=bool) | np.r_[True, np.diff(ids) != 0]
     return selected
+
+
+def first_overlapping_interval(starts, ends, intervals):
+    """Index of the first positive-duration overlap, or -1; touching is not overlap."""
+    bounds = validate_intervals(intervals)
+    starts, ends = pd.DatetimeIndex(starts), pd.DatetimeIndex(ends)
+    if (starts.hasnans or ends.hasnans or len(starts) != len(ends)
+            or (len(starts) and (starts.tz is None or ends.tz is None))
+            or (ends <= starts).any()):
+        raise ValueError("Events need valid timezone-aware start < end bounds")
+    ids = np.full(len(starts), -1, dtype=int)
+    if len(bounds):
+        positions = pd.DatetimeIndex(bounds.end).searchsorted(starts, side="right")
+        valid = ((positions < len(bounds))
+                 & (pd.DatetimeIndex(bounds.start).take(np.minimum(positions, len(bounds) - 1)) < ends))
+        ids[valid] = positions[valid]
+    return ids
+
+
+def intersect_intervals(intervals, coverage):
+    """Intersect two interval sets without joining across either set's gaps."""
+    intervals, coverage = validate_intervals(intervals), validate_intervals(coverage)
+    pieces = []
+    i = j = 0
+    while i < len(intervals) and j < len(coverage):
+        a, b = intervals.iloc[i], coverage.iloc[j]
+        start, end = max(a.start, b.start), min(a.end, b.end)
+        if start < end:
+            pieces.append((start, end))
+        if a.end <= b.end:
+            i += 1
+        else:
+            j += 1
+    return validate_intervals(pd.DataFrame(pieces, columns=["start", "end"]))
+
+
+def classify_bursts(bursts, sleep_intervals, wake_intervals):
+    """Label entire bursts: ANY counted-wake overlap wins over sleep.
+
+    Sleep requires full containment in a scored sleep interval. Other events are
+    unclassified. No clipping, splitting, duration threshold, or onset-only rule
+    is applied. Nanosecond comparisons preserve even sub-millisecond overlaps.
+    """
+    sleep = validate_intervals(sleep_intervals)
+    wake = validate_intervals(wake_intervals)
+    if not intersect_intervals(sleep, wake).empty:
+        raise ValueError("Sleep and wake intervals must not overlap")
+    out = bursts.copy()
+    wake_id = first_overlapping_interval(out.start, out.end, wake)
+    sleep_id = interval_ids(out.start, sleep)
+    full_sleep = np.zeros(len(out), dtype=bool)
+    valid = sleep_id >= 0
+    full_sleep[valid] = pd.DatetimeIndex(out.end)[valid] <= pd.DatetimeIndex(sleep.end).take(sleep_id[valid])
+    out["overlaps_wake"] = wake_id >= 0
+    out["sleep_wake"] = np.where(wake_id >= 0, "wake", np.where(full_sleep, "sleep", "unclassified"))
+    return out

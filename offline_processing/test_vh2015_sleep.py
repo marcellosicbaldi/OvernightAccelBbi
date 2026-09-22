@@ -5,9 +5,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from analysis_windows import interval_ids, select_observations, validate_intervals
+from analysis_windows import (classify_bursts, first_overlapping_interval, interval_ids,
+                              select_observations, validate_intervals)
 from burst_hr_response import analyze_burst_hr, sample_hr
-from detect_acc_bursts import detect_bursts_in_intervals
+from detect_acc_bursts import detect_bursts_in_intervals, select_bursts_by_state
 from gp_hrv import interburst_hrv
 from vh2015_sleep import (apply_minimum_wake, compute_anglez, detect_sleep_wake,
                           select_analysis_intervals, vh2015_sleep_wake_from_anglez)
@@ -162,11 +163,16 @@ class SelectedWindowTests(unittest.TestCase):
         self.assertTrue(epochs.loc[1, 20:49].isna().all())
         self.assertTrue(epochs.loc[2, -20:-2].isna().all())
         self.assertTrue(np.isnan(epochs.loc[1, 18]))  # No spline anchors across boundary.
-        self.assertTrue(np.isnan(events.loc[2, "gap_before_s"]))
+        self.assertEqual(events.loc[2, "gap_before_s"], 20.)
         np.testing.assert_allclose(result["report"]["auc_tertile_cutoffs_g_s"], [2., 3.])
         crossing = bounds([(190, 210)]).assign(AUC=1.)
+        boundary = analyze_burst_hr(crossing, observations, ORIGIN, times[-1], analysis_intervals=intervals)
+        self.assertFalse(boundary["events"].included.any())
+        self.assertIn("burst_crosses_analysis_interval", boundary["events"].exclusion_reason.iloc[0])
+        self.assertTrue(boundary["epochs_bpm"].loc[0, 10:49].isna().all())
         with self.assertRaises(ValueError):
-            analyze_burst_hr(crossing, observations, ORIGIN, times[-1], analysis_intervals=intervals)
+            analyze_burst_hr(bounds([(200, 201)]).assign(AUC=1.), observations,
+                             ORIGIN, times[-1], analysis_intervals=intervals)
 
     def test_empty_selection_and_short_interval_are_explicit(self):
         empty = bounds([])
@@ -197,6 +203,93 @@ class SelectedWindowTests(unittest.TestCase):
                                analysis_intervals=bounds([]))
         self.assertTrue(empty["windows"].empty)
         self.assertTrue(empty["intervals"].empty)
+
+
+class WholeBurstWakeAssignmentTests(unittest.TestCase):
+    def test_one_millisecond_anywhere_is_wake_but_touching_is_sleep(self):
+        sleep = bounds([(0, 10), (20, 30)])
+        wake = bounds([(10, 20)])
+        bursts = bounds([(5, 10), (5, 10.001), (19.999, 25), (20, 25),
+                         (5, 25), (12, 13), (29, 31)])
+        classified = classify_bursts(bursts, sleep, wake)
+        self.assertEqual(classified.sleep_wake.tolist(),
+                         ["sleep", "wake", "wake", "sleep", "wake", "wake", "unclassified"])
+        pd.testing.assert_frame_equal(classified[["start", "end"]], bursts)
+
+    def test_nanosecond_overlap_is_not_rounded_away(self):
+        sleep, wake = bounds([(0, 10)]), bounds([(10, 20)])
+        event = bounds([(5, 10)])
+        event.loc[0, "end"] += pd.Timedelta(nanoseconds=1)
+        self.assertEqual(classify_bursts(event, sleep, wake).sleep_wake.iloc[0], "wake")
+
+    def test_burst_spanning_state_boundaries_is_never_redetected_as_sleep(self):
+        raw = acceleration(30)
+        t = np.arange(len(raw)) / 100
+        raw[["accel_x", "accel_y", "accel_z"]] *= (1 + 0.1 * np.sin(2 * np.pi * 2 * t))[:, None]
+        full = detect_bursts_in_intervals(raw, bounds([(0, 30)]))
+        sleep, wake = bounds([(0, 12), (14, 30)]), bounds([(12, 14)])
+        sleeping = select_bursts_by_state(full, sleep, wake, "sleep_only")
+        waking = select_bursts_by_state(full, sleep, wake, "wake_only")
+        self.assertTrue(sleeping["bursts"].empty)
+        self.assertEqual(len(waking["bursts"]), 1)
+        pd.testing.assert_frame_equal(waking["bursts"][["start", "end", "AUC", "duration"]],
+                                      full["bursts"][["start", "end", "AUC", "duration"]])
+        self.assertEqual(len(sleeping["signals"]), 2)
+        for part in sleeping["signals"]:
+            self.assertFalse(((part["score"].index >= wake.start.iloc[0])
+                              & (part["score"].index < wake.end.iloc[0])).any())
+        self.assertEqual(len(waking["intervals"]), 1)
+
+    def test_minimum_wake_setting_applies_before_burst_labels(self):
+        epochs = bounds([(0, 5), (5, 10), (10, 15)])
+        epochs["wake_raw"] = [False, True, False]
+        epochs["source_segment_id"] = 0
+        event = bounds([(4, 6)])
+        for minimum, expected in [(None, "wake"), (5, "wake"), (10, "sleep")]:
+            filtered, _ = apply_minimum_wake(epochs, minimum)
+            result = {"epochs": filtered, "coverage": bounds([(0, 15)])}
+            scored = classify_bursts(event, select_analysis_intervals(result, "sleep_only"),
+                                      select_analysis_intervals(result, "wake_only"))
+            self.assertEqual(scored.sleep_wake.iloc[0], expected)
+
+    def test_wake_burst_onset_outside_wake_is_retained_without_sleep_hr(self):
+        intervals = bounds([(100, 200), (205, 300)])
+        events = bounds([(99.999, 105), (190, 220)]).assign(AUC=[1., 2.])
+        times = pd.date_range(ORIGIN, periods=301, freq="s")
+        observations = pd.DataFrame({"hr_bpm": 60., "break_before": False}, index=times)
+        result = analyze_burst_hr(events, observations, ORIGIN, times[-1], analysis_intervals=intervals)
+        self.assertEqual(len(result["events"]), 2)
+        self.assertFalse(result["events"].included.any())
+        self.assertTrue(result["events"].exclusion_reason.str.contains("burst_crosses_analysis_interval").all())
+        self.assertTrue(result["epochs_bpm"].loc[0, -20:0].isna().all())
+        self.assertTrue(result["epochs_bpm"].loc[1, 10:49].isna().all())
+        self.assertEqual(first_overlapping_interval(events.start, events.end, intervals).tolist(), [0, 0])
+
+    def test_unclassified_and_empty_selections(self):
+        full = detect_bursts_in_intervals(acceleration(30), bounds([(0, 30)]))
+        for mode in ("whole", "sleep_only", "wake_only"):
+            selected = select_bursts_by_state(full, bounds([]), bounds([]), mode)
+            self.assertTrue(selected["bursts"].empty)
+            if mode != "whole":
+                self.assertTrue(selected["intervals"].empty)
+
+    def test_excluded_wake_tails_still_block_sleep_hr_isolation_and_late_overlap(self):
+        times = pd.date_range(ORIGIN, periods=301, freq="s")
+        observations = pd.DataFrame({"hr_bpm": 60., "break_before": False}, index=times)
+        # Sleep starts at 50, but a wake-labelled movement continues until 70.
+        # A second wake-labelled burst starts at 140, preceding the wake at 160.
+        movement = bounds([(40, 70), (80, 82), (100, 102), (140, 170)]).assign(AUC=[1., 2., 3., 4.])
+        for selected_id, reason in [(1, "not_isolated_30s"), (2, "other_movement_in_hr_epoch")]:
+            result = analyze_burst_hr(movement.iloc[[selected_id]], observations, ORIGIN, times[-1],
+                                      analysis_intervals=bounds([(50, 160)]), movement_bursts=movement,
+                                      exclude_late_overlap=True)
+            self.assertFalse(result["events"].included.any())
+            self.assertIn(reason, result["events"].exclusion_reason.iloc[0])
+            self.assertEqual(result["report"]["total_bursts"], 1)
+        # The same tails must prevent quiet HRV windows in the sleep interval.
+        hrv = interburst_hrv([], movement, ORIGIN, times[-1], analysis_intervals=bounds([(50, 160)]))
+        self.assertEqual(hrv["segments"].start.iloc[0], ORIGIN + pd.Timedelta(seconds=71))
+        self.assertEqual(hrv["segments"].end.iloc[-1], ORIGIN + pd.Timedelta(seconds=140))
 
 
 if __name__ == "__main__":

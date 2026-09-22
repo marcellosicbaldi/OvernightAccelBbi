@@ -11,7 +11,7 @@ timezone information in the notebook's earlier local-time display tables.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `ANALYSIS_WINDOW` | `"whole"` | All recorded portions of the diary-cropped night, including unclassified tails |
-| Other modes | `"sleep_only"`, `"wake_only"` | Scored sleep or counted wake episodes only |
+| Other modes | `"sleep_only"`, `"wake_only"` | Select complete bursts by state; restrict HR/HRV to the corresponding intervals |
 | `MIN_WAKE_EPISODE_SECONDS` | `None` | No minimum wake duration; a number filters raw wake episodes shorter than that many seconds |
 | `SAMPLING_RATE_HZ` | `100.0` | Garmin regularization rate, shared with burst analysis |
 | `MAX_ACCEL_GAP_SECONDS` | `0.25` | Larger timestamp gaps split acquisition runs |
@@ -51,21 +51,39 @@ These are algorithmic sleep/wake estimates, not independently established sleep.
 ## Boundaries and downstream behavior
 
 All intervals use UTC `[start, end)` bounds. `analysis_intervals` is the requested
-selection. `burst_analysis_intervals` records the actual regular-grid coverage
-that supports burst filtering; intervals with insufficient filter padding are
-reported and omitted. Gaps are never joined to obtain a longer input.
+state selection. `burst_analysis_intervals` intersects that selection with the
+actual acceleration coverage. Acquisition runs with insufficient filter padding
+are reported and omitted. Gaps are never joined to obtain a longer input.
 
 - Acceleration regularization, band-pass filtering, envelope calculation and
-  burst merging run independently inside each selected interval. Even excluded
-  gaps shorter than the five-second burst merge rule remain boundaries.
+  burst merging run once on each complete diary-cropped acquisition run, before
+  state selection. Missing-data gaps remain boundaries. Complete burst identity,
+  onset, offset, duration and AUC are therefore consistent between modes.
+- **Any positive overlap with a counted wake episode labels the entire burst
+  wake**, even 1 ms. Formally, `burst.start < wake.end` and
+  `burst.end > wake.start`. Touching an endpoint alone is zero overlap. This uses
+  timestamp precision without rounding to seconds or a percentage threshold.
+  Sleep requires full containment in a scored sleep interval; all other bursts
+  are unclassified and appear only in `whole` mode. The overlap test uses wake
+  episodes remaining after `MIN_WAKE_EPISODE_SECONDS` filtering.
+- No burst is split or redetected at a sleep/wake boundary. Thus, a wake-labelled
+  burst's sleep-side fragment cannot appear in `sleep_only`. A burst spanning
+  multiple wake intervals remains one wake burst. `all_bursts_df` retains all
+  labels; `bursts_df` is the selected subset, with stable `candidate_id` values.
 - HR observations are selected before analysis. Each event uses only observations
-  from its own interval, including all linear/spline interpolation anchors.
+  from its first overlapping interval, including all linear/spline anchors.
+  Crossing wake bursts remain visible but receive `burst_crosses_analysis_interval`
+  and cannot enter HR summaries. Their onsets are never moved to the wake boundary.
   Baselines or responses crossing a boundary receive `analysis_interval_edge`;
   samples outside that interval remain missing even if another interval has HR.
   Isolation guards must fit inside the same interval. AUC tertiles are computed
   across all selected candidates together, before HR exclusions.
+  All original movements remain in isolation/late-overlap checks, including the
+  sleep-side tails of wake-labelled bursts excluded from sleep event summaries.
 - GP HRV intersects quiet segments with the same intervals before cleaning or
-  constructing windows. BBI differences, artifact detection and interpolation
+  constructing windows. All complete movement candidates block quiet periods,
+  including wake-labelled bursts extending into sleep, subject to the existing
+  minimum-burst-duration policy. BBI differences, artifact detection and interpolation
   cannot cross excluded periods. Short wake-only intervals may yield no complete
   HR-response or HRV windows; exclusions and empty tables remain inspectable.
 - Plots draw intervals separately so line segments cannot imply continuity.
@@ -80,8 +98,12 @@ still exports the diary-cropped acceleration; it is not a selected-only table.
 Synthetic tests cover the five-minute and five-degree thresholds, edge bouts,
 raw XYZ sleep/wake detection, timestamp jitter/duplicates/timezones, partial
 epochs, wake-duration filtering, empty selections, and acquisition gaps.
-Regression tests also verify that excluded acceleration cannot alter selected
-bursts, that short exclusions prevent merging, that HR boundary epochs and
-spline anchors cannot cross intervals, and that HRV cleaning/windows split.
+Regression tests verify 1 ms and sub-millisecond overlap, zero-duration endpoint
+contact, full-burst wake assignment without sleep fragments, wake-duration
+filtering before assignment, and preservation of full burst metrics. HR boundary
+epochs and spline anchors cannot cross intervals, and HRV cleaning/windows split.
+The lower-level interval detector retains independent filtering/merging when
+explicitly given separate intervals; the notebook now supplies acquisition runs
+to it and then selects complete bursts by state.
 
 Run `python -m unittest discover -s offline_processing -p "test_*.py" -v`.

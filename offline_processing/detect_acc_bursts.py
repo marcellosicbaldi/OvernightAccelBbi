@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import trapezoid
 
-from analysis_windows import validate_intervals
+from analysis_windows import (classify_bursts, first_overlapping_interval,
+                              intersect_intervals, validate_intervals)
 
 
 def _finite_values(acc):
@@ -284,3 +285,42 @@ def detect_bursts_in_intervals(accel_df, intervals, *, sampling_rate=100.0,
                                "analysis_interval_id": pd.Series(dtype=int)})
     return {"bursts": bursts, "signals": signals, "quality": pd.DataFrame(checks),
             "intervals": validate_intervals(pd.DataFrame(used, columns=["start", "end"]))}
+
+
+def select_bursts_by_state(detection, sleep_intervals, wake_intervals, mode="whole"):
+    """Select complete, once-detected bursts; never redetect sleep-side fragments.
+
+    Pass detection from detect_bursts_in_intervals on whole diary acquisition
+    runs. Any positive overlap with counted wake labels the entire burst wake.
+    The selected signal parts/HR bounds remain split at state boundaries; full
+    burst onset, offset, AUC, and candidate_id stay unchanged between modes.
+    Crossing wake bursts are retained even though their HR windows may fail QC.
+    """
+    if mode not in ("whole", "sleep_only", "wake_only"):
+        raise ValueError("mode must be 'whole', 'sleep_only', or 'wake_only'")
+    all_bursts = classify_bursts(detection["bursts"], sleep_intervals, wake_intervals)
+    all_bursts["candidate_id"] = np.arange(len(all_bursts))
+    # The original interval IDs refer to acquisition runs, not sleep/wake bounds.
+    all_bursts = all_bursts.rename(columns={"analysis_interval_id": "acquisition_interval_id"})
+    requested = detection["intervals"] if mode == "whole" else (
+        sleep_intervals if mode == "sleep_only" else wake_intervals)
+    intervals = intersect_intervals(requested, detection["intervals"])
+    mask = np.ones(len(all_bursts), dtype=bool) if mode == "whole" else (
+        all_bursts.sleep_wake == ("sleep" if mode == "sleep_only" else "wake"))
+    bursts = all_bursts.loc[mask].copy().reset_index(drop=True)
+    bursts["analysis_interval_id"] = first_overlapping_interval(bursts.start, bursts.end, intervals)
+    signals = []
+    for interval_id, interval in intervals.iterrows():
+        for part in detection["signals"]:
+            if part["magnitude"].empty:
+                continue
+            if part["magnitude"].index[-1] < interval.start or part["magnitude"].index[0] >= interval.end:
+                continue
+            selected = {"analysis_interval_id": interval_id, "threshold": part["threshold"]}
+            for name in ("magnitude", "filtered", "score"):
+                values = part[name]
+                selected[name] = values.loc[(values.index >= interval.start) & (values.index < interval.end)]
+            if not selected["magnitude"].empty:
+                signals.append(selected)
+    return {"bursts": bursts, "all_bursts": all_bursts, "signals": signals,
+            "intervals": intervals, "quality": detection["quality"].copy()}

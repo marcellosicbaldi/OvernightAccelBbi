@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
 
-from analysis_windows import interval_ids, select_observations, validate_intervals
+from analysis_windows import first_overlapping_interval, select_observations, validate_intervals
 
 
 RELATIVE_SECONDS = np.arange(-20, 50)
@@ -241,7 +241,7 @@ def assign_auc_tertiles(auc):
 
 def analyze_burst_hr(bursts, observations, recording_start, recording_end,
                      max_gap_s=3.0, artifacts=(), isolation_s=30.0, exclude_late_overlap=False,
-                     analysis_intervals=None):
+                     analysis_intervals=None, movement_bursts=None):
     """Return per-burst metrics, epochs, AUC-group summaries, curves, and QC.
 
     Isolation uses clear offset-to-onset gaps on both sides of the target
@@ -251,9 +251,13 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
     exclude_late_overlap optionally applies a stricter full-epoch movement guard.
     SEM is across events in ONE recording, not across independent subjects.
     Optional analysis_intervals are disjoint [start, end) UTC bounds. Events must
-    fit in one interval; isolation, HR anchors and artifact repairs stay within
-    it. Partial epochs retain only in-interval HR and are excluded from summaries.
+    overlap an interval. Boundary-crossing bursts retain their full geometry but
+    fail HR QC. Only the first overlapping interval supplies HR anchors/repairs;
+    no epoch can combine multiple intervals, even for a burst spanning them.
     AUC tertiles still use the entire selected candidate population.
+    movement_bursts optionally supplies ALL complete movement candidates for
+    isolation/late-overlap checks, including wake bursts excluded from sleep
+    results. Every selected burst must occur once in that table, unchanged.
     """
     if not np.isfinite(isolation_s) or isolation_s < 0:
         raise ValueError("isolation_s must be non-negative and finite")
@@ -273,21 +277,33 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
         bounds = validate_intervals(analysis_intervals)
         if (bounds.start < begin).any() or (bounds.end > finish).any():
             raise ValueError("Analysis intervals must lie within recording bounds")
-        ids = interval_ids(events.start, bounds)
-        if (ids < 0).any() or (len(events) and (events.end.array > bounds.end.iloc[ids].array).any()):
-            raise ValueError("Every burst must fit within one analysis interval")
+        ids = first_overlapping_interval(events.start, events.end, bounds)
+        if (ids < 0).any():
+            raise ValueError("Every burst must overlap an analysis interval")
         events["analysis_interval_id"] = ids
         observations = select_observations(observations, bounds)
         observations_by_interval = dict(tuple(observations.groupby("analysis_interval_id")))
     events = events.sort_values("start", kind="stable")
+    # Complete wake bursts may span more than one wake interval. They must still
+    # block isolation for later bursts, even when assigned to an earlier interval.
+    previous_end = events.end.cummax().shift(1)
+    next_start = events.start.shift(-1)
+    if movement_bursts is not None:
+        movement = movement_bursts[["start", "end"]].copy()
+        movement["start"], movement["end"] = _utc(movement.start), _utc(movement.end)
+        if (movement.end <= movement.start).any() or movement.duplicated(["start", "end"]).any():
+            raise ValueError("Movement candidates need unique start/end pairs with start < end")
+        movement = movement.sort_values("start", kind="stable").reset_index(drop=True)
+        movement["previous_end"] = movement.end.cummax().shift(1)
+        movement["next_start"] = movement.start.shift(-1)
+        neighbors = events[["start", "end"]].merge(movement, on=["start", "end"], how="left", indicator=True)
+        if (neighbors["_merge"] != "both").any():
+            raise ValueError("Every selected burst must occur unchanged in movement_bursts")
+        previous_end = pd.Series(neighbors.previous_end.array, index=events.index)
+        next_start = pd.Series(neighbors.next_start.array, index=events.index)
     if bounds is None:
-        previous_end = events.end.cummax().shift(1)
-        next_start = events.start.shift(-1)
         event_begin, event_finish = begin, finish
     else:
-        grouped = events.groupby("analysis_interval_id", sort=False)
-        previous_end = pd.to_datetime(grouped.end.transform(lambda x: x.cummax().shift(1)), utc=True)
-        next_start = grouped.start.shift(-1)
         event_begin = events.analysis_interval_id.map(bounds.start)
         event_finish = events.analysis_interval_id.map(bounds.end)
     before = (events.start - previous_end).dt.total_seconds()
@@ -309,6 +325,7 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
         if bounds is None:
             hr, gap, repaired = sample_hr(observations, times, max_gap_s=max_gap_s, artifacts=annotations)
             within_recording = times[0] >= begin and times[-1] <= finish
+            burst_within_interval = True
         else:
             interval = bounds.loc[event.analysis_interval_id]
             local_observations = observations_by_interval.get(event.analysis_interval_id, observations.iloc[:0])
@@ -318,12 +335,16 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
             inside = (times >= interval.start) & (times < interval.end)
             hr[~inside], gap[~inside], repaired[~inside] = np.nan, np.nan, False
             within_recording = bool(inside.all())
+            burst_within_interval = event.start >= interval.start and event.end <= interval.end
         baseline_ok = np.isfinite(hr[BASELINE]).all()
         baseline = float(hr[BASELINE].mean()) if baseline_ok else np.nan
-        complete = bool(np.isfinite(hr).all() and np.isfinite(baseline) and baseline > 0 and within_recording)
+        complete = bool(np.isfinite(hr).all() and np.isfinite(baseline) and baseline > 0
+                        and within_recording and burst_within_interval)
         reasons = []
         if not within_recording:
             reasons.append("analysis_interval_edge" if bounds is not None else "recording_edge")
+        if not burst_within_interval:
+            reasons.append("burst_crosses_analysis_interval")
         if not event.isolated or not event.isolation_observed:
             reasons.append("not_isolated_30s" if isolation_s == 30 else "not_isolated")
         if exclude_late_overlap and event.other_movement_in_epoch:
@@ -381,6 +402,7 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
               "annotated_artifacts": len(annotations), "isolation_s": isolation_s,
               "exclude_late_overlap": exclude_late_overlap,
               "analysis_interval_count": len(bounds) if bounds is not None else 1,
+              "isolation_movement_population": "all supplied movement candidates" if movement_bursts is not None else "selected candidates",
               "included_with_other_movement_in_epoch": int(events.loc[events.included, "other_movement_in_epoch"].sum()),
               "baseline_seconds": (
                   f"[{RELATIVE_SECONDS[BASELINE][0]}, {RELATIVE_SECONDS[BASELINE][-1] + 1}): "
