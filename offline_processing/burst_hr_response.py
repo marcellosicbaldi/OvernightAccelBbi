@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
 
+from analysis_windows import interval_ids, select_observations, validate_intervals
+
 
 RELATIVE_SECONDS = np.arange(-20, 50)
 BASELINE = (RELATIVE_SECONDS >= -20) & (RELATIVE_SECONDS < -5)
@@ -238,7 +240,8 @@ def assign_auc_tertiles(auc):
 
 
 def analyze_burst_hr(bursts, observations, recording_start, recording_end,
-                     max_gap_s=3.0, artifacts=(), isolation_s=30.0, exclude_late_overlap=False):
+                     max_gap_s=3.0, artifacts=(), isolation_s=30.0, exclude_late_overlap=False,
+                     analysis_intervals=None):
     """Return per-burst metrics, epochs, AUC-group summaries, curves, and QC.
 
     Isolation uses clear offset-to-onset gaps on both sides of the target
@@ -247,6 +250,10 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
     Features for non-isolated but HR-complete epochs are descriptive only.
     exclude_late_overlap optionally applies a stricter full-epoch movement guard.
     SEM is across events in ONE recording, not across independent subjects.
+    Optional analysis_intervals are disjoint [start, end) UTC bounds. Events must
+    fit in one interval; isolation, HR anchors and artifact repairs stay within
+    it. Partial epochs retain only in-interval HR and are excluded from summaries.
+    AUC tertiles still use the entire selected candidate population.
     """
     if not np.isfinite(isolation_s) or isolation_s < 0:
         raise ValueError("isolation_s must be non-negative and finite")
@@ -260,16 +267,36 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
     begin, finish = _utc([recording_start, recording_end])
     if finish <= begin:
         raise ValueError("Recording end must follow start")
+    bounds = None
+    observations_by_interval = {}
+    if analysis_intervals is not None:
+        bounds = validate_intervals(analysis_intervals)
+        if (bounds.start < begin).any() or (bounds.end > finish).any():
+            raise ValueError("Analysis intervals must lie within recording bounds")
+        ids = interval_ids(events.start, bounds)
+        if (ids < 0).any() or (len(events) and (events.end.array > bounds.end.iloc[ids].array).any()):
+            raise ValueError("Every burst must fit within one analysis interval")
+        events["analysis_interval_id"] = ids
+        observations = select_observations(observations, bounds)
+        observations_by_interval = dict(tuple(observations.groupby("analysis_interval_id")))
     events = events.sort_values("start", kind="stable")
-    previous_end = events.end.cummax().shift(1)
-    next_start = events.start.shift(-1)
+    if bounds is None:
+        previous_end = events.end.cummax().shift(1)
+        next_start = events.start.shift(-1)
+        event_begin, event_finish = begin, finish
+    else:
+        grouped = events.groupby("analysis_interval_id", sort=False)
+        previous_end = pd.to_datetime(grouped.end.transform(lambda x: x.cummax().shift(1)), utc=True)
+        next_start = grouped.start.shift(-1)
+        event_begin = events.analysis_interval_id.map(bounds.start)
+        event_finish = events.analysis_interval_id.map(bounds.end)
     before = (events.start - previous_end).dt.total_seconds()
     after = (next_start - events.end).dt.total_seconds()
     events["gap_before_s"] = before
     events["gap_after_s"] = after
     events["isolated"] = (before.isna() | (before >= isolation_s)) & (after.isna() | (after >= isolation_s))
-    events["isolation_observed"] = ((events.start - pd.Timedelta(seconds=isolation_s) >= begin)
-                                    & (events.end + pd.Timedelta(seconds=isolation_s) <= finish))
+    events["isolation_observed"] = ((events.start - pd.Timedelta(seconds=isolation_s) >= event_begin)
+                                    & (events.end + pd.Timedelta(seconds=isolation_s) <= event_finish))
     events["other_movement_in_epoch"] = next_start.notna() & (next_start <= events.start + pd.Timedelta(seconds=int(RELATIVE_SECONDS[-1])))
     events = events.sort_index()
 
@@ -279,14 +306,24 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
     annotations = list(artifacts)
     for burst_id, event in events.iterrows():
         times = event.start + pd.to_timedelta(RELATIVE_SECONDS, unit="s")
-        hr, gap, repaired = sample_hr(observations, times, max_gap_s=max_gap_s, artifacts=annotations)
-        within_recording = times[0] >= begin and times[-1] <= finish
+        if bounds is None:
+            hr, gap, repaired = sample_hr(observations, times, max_gap_s=max_gap_s, artifacts=annotations)
+            within_recording = times[0] >= begin and times[-1] <= finish
+        else:
+            interval = bounds.loc[event.analysis_interval_id]
+            local_observations = observations_by_interval.get(event.analysis_interval_id, observations.iloc[:0])
+            local_annotations = [(a, b) for a, b in _artifact_intervals(annotations)
+                                 if b > interval.start and a < interval.end]
+            hr, gap, repaired = sample_hr(local_observations, times, max_gap_s=max_gap_s, artifacts=local_annotations)
+            inside = (times >= interval.start) & (times < interval.end)
+            hr[~inside], gap[~inside], repaired[~inside] = np.nan, np.nan, False
+            within_recording = bool(inside.all())
         baseline_ok = np.isfinite(hr[BASELINE]).all()
         baseline = float(hr[BASELINE].mean()) if baseline_ok else np.nan
         complete = bool(np.isfinite(hr).all() and np.isfinite(baseline) and baseline > 0 and within_recording)
         reasons = []
         if not within_recording:
-            reasons.append("recording_edge")
+            reasons.append("analysis_interval_edge" if bounds is not None else "recording_edge")
         if not event.isolated or not event.isolation_observed:
             reasons.append("not_isolated_30s" if isolation_s == 30 else "not_isolated")
         if exclude_late_overlap and event.other_movement_in_epoch:
@@ -343,6 +380,7 @@ def analyze_burst_hr(bursts, observations, recording_start, recording_end,
               "hr_complete_bursts": int(events.hr_complete.sum()), "max_unannotated_gap_s": max_gap_s,
               "annotated_artifacts": len(annotations), "isolation_s": isolation_s,
               "exclude_late_overlap": exclude_late_overlap,
+              "analysis_interval_count": len(bounds) if bounds is not None else 1,
               "included_with_other_movement_in_epoch": int(events.loc[events.included, "other_movement_in_epoch"].sum()),
               "baseline_seconds": (
                   f"[{RELATIVE_SECONDS[BASELINE][0]}, {RELATIVE_SECONDS[BASELINE][-1] + 1}): "

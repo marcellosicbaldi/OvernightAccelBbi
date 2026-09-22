@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import trapezoid
 
+from analysis_windows import validate_intervals
+
 
 def _finite_values(acc):
     if not isinstance(acc, pd.Series):
@@ -226,3 +228,59 @@ def detect_bursts(acc, sampling_rate, envelope=True, resample_envelope=True, alf
     if return_signals:
         return bursts, {"filtered": filtered, "score": score, "threshold": threshold}
     return bursts
+
+
+def detect_bursts_in_intervals(accel_df, intervals, *, sampling_rate=100.0,
+                               input_unit="mg", max_gap_s=0.25, alfa=0.040,
+                               merge_gap_s=5.0):
+    """Regularize/filter/merge independently within each selected UTC interval.
+
+    Input sample_time must be timezone-aware. Short intervals that cannot support
+    the band-pass filter are reported and omitted from returned analysis bounds.
+    Returned signal parts stay separate, including for plotting. Global burst
+    IDs and analysis_interval_id connect bursts to the actual processed bounds.
+    """
+    intervals = validate_intervals(intervals)
+    times = pd.DatetimeIndex(accel_df.sample_time)
+    if times.hasnans or times.tz is None:
+        raise ValueError("sample_time must contain valid timezone-aware timestamps")
+    times = times.tz_convert("UTC")
+    source = accel_df.copy()
+    source["sample_time"] = times
+    source = source.sort_values("sample_time")
+    times = pd.DatetimeIndex(source.sample_time)
+    _positive_number(sampling_rate, "sampling_rate")
+    period = pd.Timedelta(seconds=1 / sampling_rate)
+    parts, signals, checks, used = [], [], [], []
+    for requested_id, interval in intervals.iterrows():
+        first, stop = times.searchsorted([interval.start, interval.end])
+        frame = source.iloc[first:stop]
+        if frame.sample_time.nunique() < 2:
+            checks.append({"requested_interval_id": requested_id, "status": "too_few_samples"})
+            continue
+        magnitude, quality = prepare_acceleration(frame, sampling_rate, input_unit, max_gap_s)
+        magnitude = magnitude.loc[magnitude.index + period <= interval.end]
+        if len(magnitude) <= 51:
+            checks.append({**quality, "requested_interval_id": requested_id, "status": "too_short_for_filter"})
+            continue
+        if not 0.5 <= quality["median_magnitude_g"] <= 1.5:
+            raise ValueError("Median magnitude is not near 1 g. Check input_unit and calibration.")
+        interval_id = len(used)
+        bursts, diagnostic = detect_bursts(magnitude, sampling_rate, alfa=alfa,
+                                           merge_gap_s=merge_gap_s, return_signals=True)
+        bursts["analysis_interval_id"] = interval_id
+        parts.append(bursts)
+        used.append((magnitude.index[0], magnitude.index[-1] + period))
+        signals.append({**diagnostic, "magnitude": magnitude, "analysis_interval_id": interval_id})
+        checks.append({**quality, "requested_interval_id": requested_id,
+                       "analysis_interval_id": interval_id, "status": "processed"})
+    if parts:
+        bursts = pd.concat(parts, ignore_index=True)
+    else:
+        bursts = pd.DataFrame({"start": pd.Series(dtype="datetime64[ns, UTC]"),
+                               "end": pd.Series(dtype="datetime64[ns, UTC]"),
+                               "duration": pd.Series(dtype="timedelta64[ns]"),
+                               "peak-to-peak": pd.Series(dtype=float), "AUC": pd.Series(dtype=float),
+                               "analysis_interval_id": pd.Series(dtype=int)})
+    return {"bursts": bursts, "signals": signals, "quality": pd.DataFrame(checks),
+            "intervals": validate_intervals(pd.DataFrame(used, columns=["start", "end"]))}

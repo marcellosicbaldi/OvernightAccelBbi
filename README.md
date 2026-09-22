@@ -186,6 +186,14 @@ python -m jupyterlab
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.
 
+After diary cropping, the main notebook scores **VH2015 z-angle sleep/wake**.
+Set `ANALYSIS_WINDOW` to `"whole"` (default: the entire diary-cropped night),
+`"sleep_only"`, or `"wake_only"` before running burst and HR analysis.
+`MIN_WAKE_EPISODE_SECONDS = None` retains every detected wake episode; a numeric
+minimum in seconds reclassifies shorter wake runs as sleep. Separate selected
+intervals stay separate through burst filtering/merging, HR interpolation and
+response windows, and HRV cleaning. See [VH2015 method and window selection](docs/VH2015_WINDOWS.md).
+
 The main notebook uses the adapted **GP_pipeline** HRV workflow: quiet segments
 of 1-5 minutes, 5-minute windows with 1-minute steps for longer segments,
 single-pass artifact classification, and linear interval cleaning. Raw BBIs,

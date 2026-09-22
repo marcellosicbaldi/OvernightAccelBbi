@@ -11,6 +11,7 @@ import pandas as pd
 
 from gp_hrv_artifacts import _find_artifacts
 from interburst_hrv import burst_free_segments, compute_HRF, prepare_bbi_intervals
+from analysis_windows import interval_ids, validate_intervals
 
 
 ARTIFACT_CLASSES = ("ectopic", "missed", "extra", "longshort")
@@ -76,7 +77,7 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
                   min_burst_duration_s=2.0, post_burst_guard_s=1.0,
                   min_beats=30, bbi_limits_ms=(300.0, 2000.0),
                   max_callback_gap_s=3.0, duration_fraction_limits=(0.9, 1.1),
-                  max_interpolated_fraction=1.0):
+                  max_interpolated_fraction=1.0, analysis_intervals=None):
     """Return intervals, GP quiet segments, variable windows, and provenance.
 
     GP defaults: ignore bursts <2 s for HRV segmentation, add 1 s after retained
@@ -90,6 +91,8 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
     crosses sequence holes or long callback gaps. Same-callback BBIs stay distinct.
     GP has no repaired-fraction rejection; the default 1.0 retains that behavior
     while exposing raw/artifact/repaired counts and a configurable stricter limit.
+    Optional analysis_intervals restrict BBI input and split quiet segments before
+    cleaning/window construction, so excluded sleep/wake periods are barriers.
     """
     positive = (min_window_s, max_window_s, step_s, max_callback_gap_s)
     if not all(np.isfinite(x) and x > 0 for x in positive):
@@ -117,6 +120,19 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
     used_bursts = used_bursts.loc[retained].copy()
     used_bursts["end"] += pd.Timedelta(seconds=post_burst_guard_s)
     segments = burst_free_segments(used_bursts, recording_start, recording_end)
+    if analysis_intervals is not None:
+        bounds = validate_intervals(analysis_intervals)
+        if (bounds.start < recording_start).any() or (bounds.end > recording_end).any():
+            raise ValueError("Analysis intervals must lie within recording bounds")
+        pieces = []
+        for interval_id, bound in bounds.iterrows():
+            piece = burst_free_segments(used_bursts, bound.start, bound.end)
+            piece["analysis_interval_id"] = interval_id
+            pieces.append(piece)
+        segments = pd.concat(pieces, ignore_index=True) if pieces else segments.iloc[:0].copy()
+        segments.index.name = "segment_id"
+        selected = interval_ids(intervals.callback_time_utc_approx, bounds) >= 0
+        intervals = intervals.loc[selected].reset_index(drop=True)
 
     intervals["segment_id"] = -1
     intervals["delivery_run_id"] = -1
@@ -211,6 +227,7 @@ def interburst_hrv(rows, bursts, recording_start, recording_end, *,
               "bbi_limits_ms": list(bbi_limits_ms), "max_callback_gap_s": max_callback_gap_s,
               "duration_fraction_limits": list(duration_fraction_limits),
               "max_interpolated_fraction": max_interpolated_fraction,
+              "analysis_interval_count": len(bounds) if analysis_intervals is not None else 1,
               "n_artifacts": int(intervals.artifact.sum()), "n_interpolated": int(intervals.interpolated.sum()),
               "window_bounds": "[start, end)", "timing": "callback arrival proxy, not beat timestamps",
               "cleaning": "single-pass GP classifier; linear interval-order interpolation within delivery runs",
