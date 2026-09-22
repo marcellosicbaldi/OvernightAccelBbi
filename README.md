@@ -1,12 +1,18 @@
 <p align="center">
   <img src="docs/assets/hammock-logo.png" alt="Hammock logo" width="320">
-</p>
+</p
+
+
+[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
+[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
+
+# Hammock
 
 **Consumer-grade wearables (Apple Watch, Whoop, Oura, Garmin, ...) describe sleep using categories such as awake, light sleep, deep sleep, and REM.**
 
-These categories come from **polysomnography (PSG)**, the clinical gold standard for studying sleep, which uses brain activity and other neurophysiological signals to define sleep stages. Wrist wearables do not directly measure these signals
+These categories come from **polysomnography (PSG)**, the clinical gold standard for studying sleep, which uses brain activity and other neurophysiological signals to define sleep stages. But wrist wearables do not directly measure these signals.
 
-Why should we fit those signals (that, by the way, are not even recorded by PSG) into PSG-defined boxes?
+So, why should we fit those signals (that, by the way, are not even recorded by PSG) into PSG-defined boxes?
 
 Instead of asking:
 
@@ -20,7 +26,7 @@ this project asks:
 
 ```mermaid
 flowchart LR
-    subgraph staging["Sleep-stage classification"]
+    subgraph staging["Standard wearable sleep assessment"]
         direction TB
         signals["ACC + PPG"] --> features["Feature extraction"]
         features --> model["Sleep-stage model"]
@@ -70,15 +76,11 @@ The framework separates the night into two physiological conditions:
 
 ### Movement events
 
-Accelerometry identifies nocturnal movements and quantifies their timing, duration and intensity.
-
-Around each movement, cardiac signals can be used to characterize the associated heart rate (HR) response:
+Accelerometry identifies nocturnal movements and quantifies their timing, duration and intensity. Around each movement, cardiac signals can be used to characterize the associated heart rate (HR) response:
 
 **movement → HR response → peak → recovery**
 
-With raw PPG, this can potentially be extended to pulse-wave amplitude and other vascular features.
-
-During movements, HRV cannot be extracted reliably due to motion artifacts. Rather than forcing HRV estimates where signal quality is poor, the movement itself becomes the event of interest.
+With raw PPG, this can potentially be extended to pulse-wave amplitude and other vascular features. During movements, HRV cannot be extracted reliably due to motion artifacts. Rather than forcing HRV estimates where signal quality is poor, the movement itself becomes the event of interest.
 
 ### Quiet periods
 
@@ -94,9 +96,7 @@ This allows the night to be described through both:
 
 ## From sleep staging to nocturnal phenotyping
 
-The goal is not to replicate PSG on the wrist.
-
-The goal to extract physiological metrics that can be actually measured by wrist-wearables:
+The goal is not to replicate PSG on the wrist. The goal to extract physiological metrics that can be actually measured by wrist-wearables:
 
 - movement burden and intensity
 - cardiovascular reactivity to movement
@@ -109,44 +109,7 @@ Together, these signals may define **new nocturnal phenotypes** designed for con
 
 ---
 
-# OvernightAccelBbi
 
-**Overnight movement and cardiac analysis with a Garmin watch.**
-
-[![Python tests](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml/badge.svg)](https://github.com/marcellosicbaldi/OvernightAccelBbi/actions/workflows/python-tests.yml)
-[![Release](https://img.shields.io/github/v/release/marcellosicbaldi/OvernightAccelBbi)](https://github.com/marcellosicbaldi/OvernightAccelBbi/releases)
-
-A Connect IQ recorder and Python analysis toolkit for exploring wrist movement,
-heart-rate responses around movements, and beat-to-beat variability during quiet
-periods. The project connects wearable acquisition, signal processing, quality
-assessment, and reproducible analysis in one workflow.
-
-**Current status:** research prototype with a watch recorder and working offline
-analysis modules/notebooks. The interactive **Night Explorer** is the next milestone:
-*import a night, inspect its events*. A web or mobile application is not included yet.
-
-## What it does
-
-| Component | Available functionality |
-| --- | --- |
-| Watch recorder | Native XYZ accelerometry and Garmin-delivered beat-to-beat intervals (BBIs), saved in FIT files |
-| Data recovery | Numbered BBI snapshot decoding, sequence-gap detection, final-session recovery, and legacy-format identification |
-| Movement analysis | Acceleration preprocessing, burst detection, duration, peak-to-peak amplitude, and movement AUC |
-| Cardiac responses | HR epochs aligned to movement onset, baseline normalization, intensity groups, and explicit exclusions |
-| Quiet-period HRV | GP interval cleaning and variable windows; mean HR, RMSSD, SDNN, and exploratory PIP with repair flags and quality screens |
-| Wrist reorientation | Stable changes in wrist gravity direction and descriptive comparisons at similar movement AUC |
-| Sleep diary | Timezone-aware diary matching and lights-off-to-wakeup cropping |
-
-```mermaid
-flowchart LR
-    A[Garmin watch] --> B[Local FIT recording]
-    B --> C[Decode and check quality]
-    D[Sleep diary] --> C
-    C --> E[Movement events]
-    E --> F[HR responses and quiet-period HRV]
-    F --> G[Notebook inspection and exports]
-    G -. planned .-> H[Night Explorer interface]
-```
 
 ## Get started with the analysis
 
