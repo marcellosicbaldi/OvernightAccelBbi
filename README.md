@@ -142,6 +142,14 @@ python -m jupyterlab
 
 - Start with [load_fit_test.ipynb](offline_processing/load_fit_test.ipynb) for
   recording inspection, diary cropping, bursts, recorded-HR responses, and HRV.
+- Use [across_nights.ipynb](offline_processing/across_nights.ipynb) for one subject's
+  processed SPT crops: nightly movement/HR trends, common AUC tertiles, equal-night
+  response curves, and burst-level and nightly-average correlations. Set
+  `PROCESSED_ROOT` in the notebook or `OVERNIGHT_PROCESSED_ROOT` in the environment.
+  It reads saved acceleration and recorded-HR parquet files, recomputes bursts,
+  and writes private tables under `offline_processing/outputs/across_nights/`.
+  No recovery metric is included. Use a recent PyArrow reader for these exports
+  (validated with PyArrow 23; version 19 failed to read the current files).
 - Use [wrist_reorientation_hr.ipynb](offline_processing/wrist_reorientation_hr.ipynb)
   for exploratory wrist-orientation comparisons. This notebook uses HR derived
   from BBI callbacks; the main notebook uses FIT-recorded HR for event responses.
