@@ -146,6 +146,26 @@ def _burst_ranges(score, threshold, record_start, record_end, merge_gap_s):
     return merged
 
 
+def bandpass_acceleration(acc, sampling_rate):
+    """Shared 0.1–10 Hz order-8 zero-phase filter for regular magnitude in g."""
+    values = _finite_values(acc)
+    _positive_number(sampling_rate, "sampling_rate")
+    if sampling_rate <= 20:
+        raise ValueError("sampling_rate must exceed 20 Hz for the 10 Hz upper cutoff")
+    if not isinstance(acc.index, pd.DatetimeIndex):
+        raise TypeError("acc must have a DatetimeIndex")
+    if acc.index.hasnans or not acc.index.is_unique or not acc.index.is_monotonic_increasing:
+        raise ValueError("Timestamps must be present, unique, and increasing")
+    if len(acc) <= 51:
+        raise ValueError("Need more than 51 samples for order-8 band-pass filter padding")
+    intervals = (acc.index[1:] - acc.index[:-1]).total_seconds().to_numpy()
+    if not np.allclose(intervals, 1.0 / sampling_rate, rtol=0.01, atol=1e-9):
+        raise ValueError("Timestamps do not match sampling_rate; regularize or split the signal first")
+    return pd.Series(nk.signal_filter(values, sampling_rate=sampling_rate,
+                     lowcut=0.1, highcut=10, method="butterworth", order=8),
+                     index=acc.index, name="filtered_g")
+
+
 def detect_bursts(acc, sampling_rate, envelope=True, resample_envelope=True, alfa=None,
                   *, merge_gap_s=5.0, return_signals=False):
     """Detect bursts from UNFILTERED acceleration magnitude in g.
@@ -173,25 +193,9 @@ def detect_bursts(acc, sampling_rate, envelope=True, resample_envelope=True, alf
     Edge transients and extrema-count smoothing remain methodological limits;
     these fixes do not independently validate the supplied wrist threshold.
     """
-    values = _finite_values(acc)
-    _positive_number(sampling_rate, "sampling_rate")
     _positive_number(alfa, "alfa")
     _positive_number(merge_gap_s, "merge_gap_s", allow_zero=True)
-    if sampling_rate <= 20:
-        raise ValueError("sampling_rate must exceed 20 Hz for the 10 Hz upper cutoff")
-    if not isinstance(acc.index, pd.DatetimeIndex):
-        raise TypeError("acc must have a DatetimeIndex")
-    if acc.index.hasnans or not acc.index.is_unique or not acc.index.is_monotonic_increasing:
-        raise ValueError("Timestamps must be present, unique, and increasing")
-    if len(acc) <= 51:
-        raise ValueError("Need more than 51 samples for order-8 band-pass filter padding")
-    intervals = (acc.index[1:] - acc.index[:-1]).total_seconds().to_numpy()
-    if not np.allclose(intervals, 1.0 / sampling_rate, rtol=0.01, atol=1e-9):
-        raise ValueError("Timestamps do not match sampling_rate; regularize or split the signal first")
-
-    filtered = pd.Series(nk.signal_filter(values, sampling_rate=sampling_rate,
-                         lowcut=0.1, highcut=10, method="butterworth", order=8),
-                         index=acc.index, name="filtered_g")
+    filtered = bandpass_acceleration(acc, sampling_rate)
     if envelope:
         score = compute_envelope(filtered, resample=resample_envelope)
         threshold = float(alfa)

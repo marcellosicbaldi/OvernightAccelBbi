@@ -1,4 +1,4 @@
-"""Synthetic checks of ENMO units, missingness, fitting and internal time."""
+"""Synthetic checks of envelope units, missingness, fitting and internal time."""
 
 import tempfile
 import unittest
@@ -8,49 +8,84 @@ import numpy as np
 import pandas as pd
 
 from lids_analysis import (LIDSConfig, acceleration_to_lids, analyze_nights,
-                           fit_lids, internal_profile, save_results)
+                           fit_lids, internal_profile, save_results, minute_activity, activity_to_lids)
+from detect_acc_bursts import prepare_acceleration, detect_bursts
 
 
 class LIDSTests(unittest.TestCase):
-    def acceleration(self, minutes=70):
-        t = pd.date_range("2026-01-01 23:30", periods=minutes * 60, freq="s")
+    FS = 50
+
+    def acceleration(self, minutes=70, baseline_mg=1000):
+        seconds = np.arange(minutes * 60 * self.FS) / self.FS
+        t = pd.date_range("2026-01-01 23:30", periods=len(seconds), freq="20ms")
         return pd.DataFrame({"sample_time": t, "accel_x": 0.0,
-                             "accel_y": 0.0, "accel_z": 1009.0})
+                             "accel_y": 0.0, "accel_z": baseline_mg + 10 * np.sin(2*np.pi*3*seconds)})
 
-    def test_enmo_units_transform_and_night_boundary(self):
-        acc = self.acceleration(25)
-        bins, qc = acceleration_to_lids(acc, LIDSConfig(sampling_rate=1))
-        np.testing.assert_allclose(bins.enmo_mg, 9)
-        np.testing.assert_allclose(bins.lids[:2], 10)
-        self.assertTrue(np.isnan(bins.lids.iloc[-1]))
-        self.assertAlmostEqual(bins.coverage.iloc[-1], 0.5)
-        self.assertEqual(qc["duration_min"], 25)
+    def test_minute_means_match_burst_envelope_and_units(self):
+        acc = self.acceleration(20)
+        config = LIDSConfig(sampling_rate=self.FS)
+        minutes, qc = minute_activity(acc, config)
+        magnitude, _ = prepare_acceleration(acc, self.FS)
+        _, diagnostic = detect_bursts(magnitude, self.FS, alfa=0.020, return_signals=True)
+        expected = (diagnostic["score"] * 1000).resample("1min", origin=magnitude.index[0]).mean()
+        np.testing.assert_allclose(minutes.envelope_mg, expected)
+        self.assertEqual(qc["duration_min"], 20)
         acc[["accel_x", "accel_y", "accel_z"]] /= 1000
-        converted, _ = acceleration_to_lids(acc, LIDSConfig(sampling_rate=1, input_unit="g"))
-        np.testing.assert_allclose(bins.lids, converted.lids)
+        converted, _ = minute_activity(acc, LIDSConfig(sampling_rate=self.FS, input_unit="g"))
+        np.testing.assert_allclose(minutes.envelope_mg, converted.envelope_mg)
 
-    def test_missing_data_not_inactivity_or_smoothed_across(self):
-        acc = self.acceleration()
-        acc.loc[acc.index >= 40 * 60, "accel_z"] = 1099
-        acc = acc.drop(index=np.arange(20 * 60, 40 * 60))
-        bins, _ = acceleration_to_lids(acc, LIDSConfig(sampling_rate=1))
+    def test_ten_minute_sum_before_nonlinear_transform(self):
+        minutes = pd.DataFrame({"envelope_mg": np.arange(1., 26), "coverage": 1.},
+                               index=pd.date_range("2026-01-01", periods=25, freq="1min"))
+        bins = activity_to_lids(minutes)
+        self.assertEqual(bins.activity_sum_mg.iloc[0], 55)
+        self.assertEqual(bins.activity_sum_mg.iloc[1], 155)
+        self.assertAlmostEqual(bins.lids_raw.iloc[0], 100/56)
+        self.assertAlmostEqual(bins.lids.iloc[0], (100/56 + 100/156)/2)
+        self.assertTrue(np.isnan(bins.lids_raw.iloc[-1]))
+        minutes.iloc[5, 0] = np.nan
+        bins = activity_to_lids(minutes)
+        self.assertTrue(np.isnan(bins.lids_raw.iloc[0]))
+        self.assertAlmostEqual(bins.lids.iloc[1], 100/156)
+
+    def test_additive_gravity_offset_does_not_clip_activity(self):
+        normal, _ = minute_activity(self.acceleration(10), LIDSConfig(sampling_rate=self.FS))
+        shifted, _ = minute_activity(self.acceleration(10, baseline_mg=850), LIDSConfig(sampling_rate=self.FS))
+        np.testing.assert_allclose(normal.envelope_mg, shifted.envelope_mg, rtol=1e-6, atol=1e-6)
+        self.assertTrue((shifted.envelope_mg > 15).all())
+
+    def test_gap_runs_are_filtered_independently(self):
+        acc = self.acceleration(60)
+        n = 20 * 60 * self.FS
+        parts = [acc.iloc[:n], acc.iloc[2*n:]]
+        combined, qc = minute_activity(pd.concat(parts), LIDSConfig(sampling_rate=self.FS))
+        self.assertEqual(qc["acquisition_runs"], 2)
+        self.assertTrue(combined.envelope_mg.iloc[20:40].isna().all())
+        for part in parts:
+            separate, _ = minute_activity(part, LIDSConfig(sampling_rate=self.FS))
+            np.testing.assert_allclose(combined.loc[separate.index, "envelope_mg"], separate.envelope_mg)
+        bins = activity_to_lids(combined)
         self.assertTrue(bins.lids.iloc[2:4].isna().all())
-        np.testing.assert_allclose(bins.lids.iloc[:2], 10)
-        np.testing.assert_allclose(bins.lids.iloc[4:], 1)
 
     def test_duplicates_do_not_inflate_coverage(self):
         acc = self.acceleration(20)
         duplicated = pd.concat([acc, acc.iloc[:100]], ignore_index=True)
-        bins, qc = acceleration_to_lids(duplicated, LIDSConfig(sampling_rate=1))
+        minutes, qc = minute_activity(duplicated, LIDSConfig(sampling_rate=self.FS))
         self.assertEqual(qc["duplicate_samples"], 100)
-        np.testing.assert_allclose(bins.coverage, 1)
+        np.testing.assert_allclose(minutes.coverage, 1)
 
     def test_nonfinite_xyz_reduces_coverage(self):
         acc = self.acceleration(20)
-        acc.loc[:100, "accel_x"] = np.inf
-        bins, _ = acceleration_to_lids(acc, LIDSConfig(sampling_rate=1))
+        acc.loc[:600, "accel_x"] = np.inf
+        bins, _ = acceleration_to_lids(acc, LIDSConfig(sampling_rate=self.FS))
         self.assertTrue(np.isnan(bins.lids.iloc[0]))
-        self.assertAlmostEqual(bins.lids.iloc[1], 10)
+        self.assertTrue(np.isfinite(bins.lids.iloc[1]))
+
+    def test_short_runs_are_missing_not_inactivity(self):
+        acc = self.acceleration(1).iloc[:40]
+        minutes, qc = minute_activity(acc, LIDSConfig(sampling_rate=self.FS))
+        self.assertEqual(qc["runs_too_short"], 1)
+        self.assertTrue(minutes.envelope_mg.isna().all())
 
     def test_projection_matches_reference_and_recovers_period(self):
         t = np.arange(0, 720, 10)
@@ -91,7 +126,7 @@ class LIDSTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LIDSConfig(sampling_rate=np.nan)
         with self.assertRaises(ValueError):
-            acceleration_to_lids(self.acceleration(), LIDSConfig(sampling_rate=100))
+            acceleration_to_lids(self.acceleration(), LIDSConfig(sampling_rate=200))
 
     def test_internal_time_scaling_counts_and_equal_night_mean(self):
         # A: period 180 -> 20 external minutes = 10 internal minutes.
@@ -130,8 +165,8 @@ class LIDSTests(unittest.TestCase):
 
     def test_dst_aware_elapsed_time(self):
         acc = self.acceleration(70)
-        acc["sample_time"] = pd.date_range("2026-10-25 00:30Z", periods=len(acc), freq="s")
-        bins, qc = acceleration_to_lids(acc, LIDSConfig(sampling_rate=1))
+        acc["sample_time"] = pd.date_range("2026-10-25 00:30Z", periods=len(acc), freq="20ms")
+        bins, qc = acceleration_to_lids(acc, LIDSConfig(sampling_rate=self.FS))
         np.testing.assert_allclose(bins.external_min, np.arange(7) * 10)
         self.assertEqual(qc["duration_min"], 70)
 
@@ -143,12 +178,12 @@ class LIDSTests(unittest.TestCase):
             for night in ["good", "bad"]:
                 (root / night).mkdir()
             acc = self.acceleration(180)
-            t = np.arange(len(acc)) / 60
-            desired_lids = 50 + 20 * np.cos(2 * np.pi * t / 90)
-            acc["accel_z"] = 1000 + 100/desired_lids - 1
+            seconds = np.arange(len(acc)) / self.FS
+            amplitude = 10 + 8 * np.cos(2 * np.pi * seconds / (90*60))
+            acc["accel_z"] = 1000 + amplitude * np.sin(2*np.pi*3*seconds)
             acc.to_parquet(root / "good" / "accelerometer_samples.parquet")
             pd.DataFrame({"wrong": [1]}).to_parquet(root / "bad" / "accelerometer_samples.parquet")
-            result = analyze_nights(root, LIDSConfig(sampling_rate=1))
+            result = analyze_nights(root, LIDSConfig(sampling_rate=self.FS))
             self.assertEqual(result["summary"].loc["bad", "status"], "input_error")
             self.assertEqual(result["summary"].loc["good", "status"], "ok")
             save_results(result, root / "output")

@@ -1,4 +1,4 @@
-# Garmin ENMO–LIDS
+# Garmin envelope–LIDS
 
 Run `lids.ipynb` for nightly plots, a parameter table, and the mean of four
 period-normalized LIDS cycles. The input is the existing, already SPT-cropped
@@ -9,7 +9,7 @@ Set `OVERNIGHT_PROCESSED_ROOT`, set `PROCESSED_ROOT` in the notebook, or put
 `{"processed_root": "/path/to/garmin_processed"}` in a private, Git-ignored
 `offline_processing/lids.local.json`. Relative paths resolve against the
 notebook's module directory. Outputs
-default to the Git-ignored `offline_processing/outputs/lids/`. The command-line
+default to the Git-ignored `offline_processing/outputs/lids_envelope/`. The command-line
 equivalent is:
 
 ```sh
@@ -18,32 +18,48 @@ python offline_processing/lids_analysis.py /path/to/garmin_processed
 
 ## Activity and transformation
 
-This is an **ENMO adaptation**, not a calibrated reproduction of actigraph ZCM
-counts. The activity scale changes LIDS amplitude, offset, MRI and potentially
-the chosen period. Do not directly compare their numerical values to ZCM-based
-results.
+This is an **acceleration-envelope adaptation**, not a calibrated reproduction
+of actigraph ZCM counts. The activity scale changes LIDS amplitude, offset, MRI
+and potentially the chosen period. Do not directly compare these values to
+ZCM-based results or the previous ENMO analysis.
 
-1. Interpret the Garmin XYZ values as mg (configurable), with nominal sampling
-   rate 100 Hz. Interpret naive timestamps in Europe/Rome (configurable).
-2. Average duplicate XYZ timestamps, then compute each sample's ENMO:
-   `max(sqrt(x² + y² + z²) - 1000, 0)` mg. No extra sensor calibration or filtering
-   is applied. The recorded 1-g norm is assumed to be calibrated.
-3. Average ENMO into 10-minute bins anchored at the first saved SPT sample.
-   Local timestamps label each bin's left edge; elapsed time begins at zero.
-   This keeps nights aligned to SPT onset instead of rounding onset to a clock
-   multiple of ten minutes. Timestamp differences preserve real elapsed time
-   across timezone transitions. Ambiguous naive DST timestamps are rejected.
-4. Require at least 90% of the expected finite unique samples per full bin.
-   Short trailing bins also use the full-bin denominator and are usually
-   excluded. Invalid/missing bins are never converted into zero activity.
-5. Transform **the binned mean**: `LIDS = 100 / (1 + mean_ENMO_mg)`.
-   Larger LIDS means less movement. Smooth with a centered three-bin (30-minute)
-   moving mean. At valid-run edges, use the available one or two bins; never
-   smooth through a missing bin. Both raw and smoothed values are retained.
+1. Interpret Garmin XYZ as mg (configurable), nominally 100 Hz. Interpret naive
+   timestamps in Europe/Rome (configurable). Use the existing burst-analysis
+   `prepare_acceleration`: compute magnitude in g, average duplicate magnitudes,
+   and interpolate onto a regular sampling grid.
+2. Process continuous finite runs independently: split at invalid XYZ samples
+   or gaps longer than `max_gap_s=0.25`. Skip runs too short for filter padding
+   (51 samples or fewer). Do not filter across gaps; midnight itself does not split a continuous recording.
+3. Use the shared burst-analysis `bandpass_acceleration`: 0.1–10 Hz, order-8,
+   zero-phase Butterworth, using NeuroKit's SOS implementation. Then use the
+   same `compute_envelope`: upper minus lower envelope, each interpolated from
+   groups of ten extrema. No burst threshold or event selection is applied.
+4. Convert the continuous envelope from g to **mg**, then average each minute.
+   Minutes are anchored at the first saved SPT sample and labeled at their left
+   edges. Require at least 90% coverage in both finite unique observed samples
+   and processed regular samples. Missing samples are never treated as zero.
+5. **Sum ten valid one-minute means** to obtain each 10-minute activity score:
+   `activity_sum_mg = sum(minute_mean_envelope_mg)`.
+   All ten minutes must be valid; do not sum a shorter or incomplete bin.
+   This is a sum of minute-mean mg values, not an integral in mg·s or activity
+   counts. The mg scale is explicit: using g would change the LIDS transform.
+6. Convert `LIDS = 100 / (1 + activity_sum_mg)`, then smooth with a centered
+   three-bin (30-minute) moving mean. At valid-run edges use the available one
+   or two bins; never smooth through a missing bin. Higher LIDS means less
+   movement. Both raw and smoothed values are retained.
 
-The reference notebook transforms minute-level ZCM before smoothing. The Garmin
-adaptation instead uses the requested 10-minute timeline and a defined ENMO
-scale; it is not intended to produce identical values to that notebook.
+Elapsed time uses actual timestamp differences across timezone transitions;
+ambiguous naive DST timestamps are rejected. The high-pass component removes
+constant magnitude offsets, avoiding ENMO's subtraction of a fixed 1-g baseline
+and clipping below that baseline. This does not eliminate all calibration
+issues: axis scale errors still affect the envelope. Filter-edge transients
+and constant envelope extension beyond outer extrema follow the burst method.
+
+Minute-level CSVs expose the means and coverage used for every activity sum.
+The reference notebook transforms minute-level ZCM; this adaptation instead
+sums minute-mean envelopes into the requested 10-minute timeline before LIDS.
+Previous local ENMO results remain in `outputs/lids/`; new outputs are written
+to `outputs/lids_envelope/`.
 
 ## Fit parameters
 
@@ -99,7 +115,7 @@ reports nights with any data, all nine positions, and minimum/maximum per-bin
 counts for each cycle. The quoted ~50% fourth-cycle retention is a motivation
 for limiting to four cycles, not an assumed property of these recordings.
 
-Files include nightly PNGs and binned CSVs, `lids_summary.csv`,
+Files include nightly PNGs, one-minute activity CSVs, and 10-minute binned CSVs, `lids_summary.csv`,
 `lids_normalized.csv`, `lids_profile.csv`, `lids_cycles.csv`, `settings.json`,
 and `lids_average.png`/`.svg`. Personal results and executed notebook copies
 stay local. The committed notebook has no outputs.

@@ -150,10 +150,10 @@ python -m jupyterlab
   and writes private tables under `offline_processing/outputs/across_nights/`.
   No recovery metric is included. Use a recent PyArrow reader for these exports
   (validated with PyArrow 23; version 19 failed to read the current files).
-- Use [lids.ipynb](offline_processing/lids.ipynb) for nightly Garmin ENMO–LIDS
+- Use [lids.ipynb](offline_processing/lids.ipynb) for nightly Garmin envelope–LIDS
   curves, cosine-fit parameters, and a four-cycle average normalized to each
   night's fitted period. It reads the same SPT-cropped acceleration parquets;
-  see [method and usage](offline_processing/LIDS.md) for the ENMO adaptation,
+  see [method and usage](offline_processing/LIDS.md) for the envelope adaptation,
   missing-data rules, phase convention, and private outputs.
 - Use [wrist_reorientation_hr.ipynb](offline_processing/wrist_reorientation_hr.ipynb)
   for exploratory wrist-orientation comparisons. This notebook uses HR derived

@@ -1,7 +1,7 @@
-"""Garmin ENMO adaptation of LIDS, with reference projection cosine fitting.
+"""Garmin envelope adaptation of LIDS, with reference projection cosine fitting.
 
 Reference: https://github.com/marcellosicbaldi/lids-analysis (cosine_fit.py).
-ENMO in mg is not calibrated ZCM activity counts; amplitudes/MRI are specific
+Summed minute-mean envelope in mg is not calibrated ZCM activity counts; amplitudes/MRI are specific
 to this adaptation. Inputs must already be cropped to sleep_period_time.
 """
 
@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from detect_acc_bursts import bandpass_acceleration, compute_envelope, prepare_acceleration
+
 
 @dataclass(frozen=True)
 class LIDSConfig:
@@ -22,6 +24,7 @@ class LIDSConfig:
     input_unit: str = "mg"
     sampling_rate: float = 100.0
     min_coverage: float = 0.90
+    max_gap_s: float = 0.25
     period_min: float = 30.0
     period_max: float = 180.0
     period_step: float = 5.0
@@ -30,8 +33,10 @@ class LIDSConfig:
     def __post_init__(self):
         if self.input_unit not in ("g", "mg"):
             raise ValueError("input_unit must be g or mg")
-        if not np.isfinite(self.sampling_rate) or self.sampling_rate <= 0:
-            raise ValueError("sampling_rate must be positive and finite")
+        if not np.isfinite(self.sampling_rate) or self.sampling_rate <= 20:
+            raise ValueError("sampling_rate must exceed 20 Hz for the band-pass filter")
+        if not np.isfinite(self.max_gap_s) or self.max_gap_s <= 0:
+            raise ValueError("max_gap_s must be positive and finite")
         if not 0 < self.min_coverage <= 1:
             raise ValueError("min_coverage must be in (0, 1]")
         bounds = [self.period_min, self.period_max, self.period_step]
@@ -41,61 +46,104 @@ class LIDSConfig:
             raise ValueError("fit_method must be projection or least_squares")
 
 
-def acceleration_to_lids(acc: pd.DataFrame, config=LIDSConfig()):
-    """Mean max(norm(XYZ_mg)-1000, 0) per onset-anchored 10-minute bin.
+def minute_activity(acc: pd.DataFrame, config=LIDSConfig()):
+    """Average the burst-analysis envelope each minute, in mg.
 
-    Duplicate timestamps are averaged first. Coverage uses finite unique XYZ
-    samples / (600 * nominal Hz), including the entire final bin denominator.
-    Bins below coverage threshold (including short final bins) remain NaN.
-    Smooth 100/(1+mean_ENMO_mg) with a centered three-bin mean, independently
-    within each contiguous valid run. Edges use the available one/two bins.
-    Naive timestamps are local; aware timestamps are converted to config.timezone.
-    Elapsed time uses actual timestamp differences, including DST transitions.
+    The shared burst helpers regularize magnitude, band-pass 0.1–10 Hz (order
+    8), then subtract lower from upper envelopes (groups of ten extrema).
+    Process continuous finite runs separately; never filter across invalid XYZ
+    or gaps > max_gap_s. Envelopes are continuous scores, without thresholding.
+    Minute coverage requires both observed unique and processed regular samples.
     """
     columns = ["accel_x", "accel_y", "accel_z"]
     times = pd.DatetimeIndex(pd.to_datetime(acc["sample_time"]))
     if times.hasnans or len(times) < 2:
         raise ValueError("Need at least two nonmissing acceleration timestamps")
-    if times.tz is None:
-        times = times.tz_localize(config.timezone, ambiguous="raise", nonexistent="raise")
-    else:
-        times = times.tz_convert(config.timezone)
-    xyz = acc[columns].copy()
-    xyz.index = times
-    duplicates = int(times.duplicated().sum())
-    # A nonfinite axis invalidates the whole sample, including duplicate rows.
-    xyz.loc[~np.isfinite(xyz.to_numpy(dtype=float)).all(axis=1), :] = np.nan
-    xyz = xyz.groupby(level=0, sort=True).mean()
-    if len(xyz) < 2:
+    times = (times.tz_localize(config.timezone, ambiguous="raise", nonexistent="raise")
+             if times.tz is None else times.tz_convert(config.timezone))
+    source = acc[columns].copy()
+    source["sample_time"] = times
+    source = source.sort_values("sample_time", kind="stable").reset_index(drop=True)
+    times = pd.DatetimeIndex(source.sample_time)
+    unique_times = times.drop_duplicates()
+    if len(unique_times) < 2:
         raise ValueError("Need at least two distinct timestamps")
-    delta_s = np.diff(xyz.index.asi8) / 1e9
+    delta_s = np.diff(unique_times.asi8) / 1e9
     observed_hz = 1 / np.median(delta_s)
     if not np.isclose(observed_hz, config.sampling_rate, rtol=0.25):
         raise ValueError(f"Median sampling rate {observed_hz:.1f} Hz disagrees with configured {config.sampling_rate:g} Hz")
-    magnitude = np.linalg.norm(xyz.to_numpy(dtype=float), axis=1)
-    if config.input_unit == "g":
-        magnitude *= 1000
-    enmo = pd.Series(np.maximum(magnitude - 1000, 0), index=xyz.index)
-    start = enmo.index[0]
-    groups = enmo.resample("10min", origin=start)
-    bins = pd.DataFrame({"enmo_mg": groups.mean(), "valid_samples": groups.count()})
-    bins.index.name = "timestamp"
-    bins["coverage"] = bins.valid_samples / (600 * config.sampling_rate)
-    bins["valid"] = bins.coverage >= config.min_coverage
-    bins["lids_raw"] = (100 / (1 + bins.enmo_mg)).where(bins.valid)
+    finite = np.isfinite(source[columns].to_numpy(dtype=float)).all(axis=1)
+    # Invalidate every duplicate at an invalid timestamp, rather than hiding it
+    # by averaging with the remaining finite rows.
+    if not finite.all():
+        finite &= ~times.isin(times[~finite])
+    gap_before = np.r_[True, np.diff(times.asi8) / 1e9 > config.max_gap_s]
+    starts = np.flatnonzero(finite & (gap_before | ~np.r_[False, finite[:-1]]))
+    ends = np.flatnonzero(finite & (np.r_[gap_before[1:], True] | ~np.r_[finite[1:], False]))
+    start = times[0]
+    end = times[-1] + pd.Timedelta(seconds=1 / config.sampling_rate)
+    minute_index = pd.date_range(start, periods=int((times[-1] - start).total_seconds() // 60) + 1, freq="1min")
+    observed = pd.Series(1, index=times[finite].drop_duplicates()).resample("1min", origin=start).sum()
+    totals, skipped = [], 0
+    for first, last in zip(starts, ends):
+        part = source.iloc[first:last + 1]
+        if part.sample_time.nunique() < 2:
+            skipped += 1
+            continue
+        magnitude, _ = prepare_acceleration(part, config.sampling_rate, config.input_unit, config.max_gap_s)
+        if len(magnitude) <= 51:
+            skipped += 1
+            continue
+        envelope_mg = 1000 * compute_envelope(bandpass_acceleration(magnitude, config.sampling_rate))
+        groups = envelope_mg.resample("1min", origin=start)
+        totals.append(pd.DataFrame({"sum": groups.sum(), "processed_samples": groups.count()}))
+    if totals:
+        aggregated = pd.concat(totals).groupby(level=0).sum().reindex(minute_index, fill_value=0)
+    else:
+        aggregated = pd.DataFrame(0., index=minute_index, columns=["sum", "processed_samples"])
+    minutes = pd.DataFrame(index=minute_index)
+    minutes.index.name = "timestamp"
+    minutes["observed_samples"] = observed.reindex(minute_index, fill_value=0)
+    minutes["processed_samples"] = aggregated.processed_samples
+    minutes["coverage"] = np.minimum(minutes.observed_samples, minutes.processed_samples) / (60 * config.sampling_rate)
+    minutes["valid"] = minutes.coverage >= config.min_coverage
+    minutes["envelope_mg"] = (aggregated["sum"] / aggregated.processed_samples.where(aggregated.processed_samples > 0)).where(minutes.valid)
+    minutes["external_min"] = (minutes.index - start).total_seconds() / 60
+    qc = {"spt_start": start.isoformat(), "spt_end": end.isoformat(),
+          "duration_min": (end - start).total_seconds() / 60,
+          "duplicate_samples": int(times.duplicated().sum()), "median_sampling_hz": observed_hz,
+          "max_sample_gap_s": float(delta_s.max()), "acquisition_runs": len(starts),
+          "runs_too_short": skipped, "minutes_total": len(minutes),
+          "minutes_valid": int(minutes.valid.sum()),
+          "sample_coverage": float(minutes.observed_samples.sum() / ((end - start).total_seconds() * config.sampling_rate))}
+    return minutes, qc
+
+
+def activity_to_lids(minutes):
+    """Sum ten valid one-minute means, transform, then smooth three bins.
+
+    All ten minutes must pass coverage; missing/partial bins stay missing.
+    Sum of minute-mean mg values is an activity score, not calibrated counts.
+    """
+    groups = minutes.resample("10min", origin=minutes.index[0])
+    bins = pd.DataFrame({"activity_sum_mg": groups.envelope_mg.sum(min_count=10),
+                         "valid_minutes": groups.envelope_mg.count(),
+                         "coverage": groups.coverage.sum() / 10})
+    bins["valid"] = bins.valid_minutes == 10
+    bins["lids_raw"] = (100 / (1 + bins.activity_sum_mg)).where(bins.valid)
     bins["lids"] = np.nan
-    # Never smooth through an invalid bin or interpolate it into existence.
     run_ids = (~bins.valid).cumsum()
     for _, run in bins.loc[bins.valid].groupby(run_ids[bins.valid]):
         bins.loc[run.index, "lids"] = run.lids_raw.rolling(3, center=True, min_periods=1).mean()
-    bins["external_min"] = (bins.index - start).total_seconds() / 60
-    end = enmo.index[-1] + pd.Timedelta(seconds=1 / config.sampling_rate)
-    qc = {"spt_start": start.isoformat(), "spt_end": end.isoformat(),
-          "duration_min": (end - start).total_seconds() / 60,
-          "duplicate_samples": duplicates, "median_sampling_hz": observed_hz,
-          "max_sample_gap_s": float(delta_s.max()), "bins_total": len(bins),
-          "bins_valid": int(bins.valid.sum()),
-          "sample_coverage": float(enmo.count() / ((end - start).total_seconds() * config.sampling_rate))}
+    bins["external_min"] = (bins.index - minutes.index[0]).total_seconds() / 60
+    return bins
+
+
+def acceleration_to_lids(acc: pd.DataFrame, config=LIDSConfig()):
+    """Convenience wrapper returning 10-minute LIDS and acquisition quality."""
+    minutes, qc = minute_activity(acc, config)
+    bins = activity_to_lids(minutes)
+    qc.update(bins_total=len(bins), bins_valid=int(bins.valid.sum()))
     return bins, qc
 
 
@@ -203,15 +251,18 @@ def analyze_nights(root, config=LIDSConfig(), progress=None):
     paths = sorted(Path(root).glob("*/accelerometer_samples.parquet"))
     if not paths:
         raise FileNotFoundError(f"No */accelerometer_samples.parquet under {root}")
-    bouts, rows = {}, []
+    bouts, minute_bouts, rows = {}, {}, []
     for path in paths:
         if progress:
             progress(f"LIDS: {path.parent.name}")
-        row = {"night": path.parent.name, "activity_metric": "mean_ENMO_mg",
+        row = {"night": path.parent.name, "activity_metric": "sum_10_minute_mean_envelope_mg",
                "fit_method": config.fit_method}
         try:
             acc = pd.read_parquet(path, columns=["sample_time", "accel_x", "accel_y", "accel_z"])
-            bins, qc = acceleration_to_lids(acc, config)
+            minutes, qc = minute_activity(acc, config)
+            bins = activity_to_lids(minutes)
+            qc.update(bins_total=len(bins), bins_valid=int(bins.valid.sum()))
+            minute_bouts[path.parent.name] = minutes
             del acc
             fit, bins["fitted"] = fit_lids(bins.lids, bins.external_min, config)
             row.update(qc)
@@ -222,7 +273,7 @@ def analyze_nights(root, config=LIDSConfig(), progress=None):
         rows.append(row)
     summaries = pd.DataFrame(rows).set_index("night")
     normalized, profile, cycles = internal_profile(bouts, summaries)
-    return {"bouts": bouts, "summary": summaries, "normalized": normalized,
+    return {"bouts": bouts, "minutes": minute_bouts, "summary": summaries, "normalized": normalized,
             "profile": profile, "cycles": cycles, "config": config}
 
 
@@ -245,7 +296,7 @@ def plot_night(night, bins, row):
             detail += " | boundary period"
     else:
         detail = f"Fit unavailable: {row.status}"
-    ax.set_title(f"{night}  ·  Garmin ENMO–LIDS\n{detail}", fontsize=11, loc="left")
+    ax.set_title(f"{night}  ·  Garmin envelope–LIDS\n{detail}", fontsize=11, loc="left")
     ax.set_ylabel("LIDS (higher = less movement)")
     ax.set_xlabel(f"Local time ({bins.index.tz}) · {row.fit_method} fit")
     ax.xaxis.set_major_formatter(DateFormatter("%H:%M", tz=bins.index.tz))
@@ -265,7 +316,7 @@ def plot_average(result):
     ax.fill_between(x, profile["mean"] - profile["sem"], profile["mean"] + profile["sem"],
                     color="#137d8d", alpha=0.20, label="Mean ± SEM across nights")
     ax.plot(x, profile["mean"], color="#137d8d", lw=2.5, label="Equal-night mean")
-    ax.set_title("Average Garmin ENMO–LIDS · four internal cycles", loc="left", pad=38)
+    ax.set_title("Average Garmin envelope–LIDS · four internal cycles", loc="left", pad=38)
     ax.set_ylabel("LIDS (higher = less movement)")
     ax.legend(fontsize=9, loc="lower left", bbox_to_anchor=(0, 1.01), ncol=2, frameon=False)
     counts.step(x, profile.n_nights, where="mid", color="#137d8d")
@@ -293,13 +344,17 @@ def save_results(result, output):
     for key in ("summary", "normalized", "profile", "cycles"):
         result[key].to_csv(output / f"lids_{key}.csv")
     (output / "settings.json").write_text(json.dumps({
-        **asdict(result["config"]), "activity_metric": "mean_ENMO_mg",
+        **asdict(result["config"]), "activity_metric": "sum_10_minute_mean_envelope_mg",
+        "minute_epoch_seconds": 60, "ten_minute_aggregation": "sum (10 valid minutes required)",
+        "activity_unit": "sum of minute-mean envelope mg",
+        "bandpass_hz": [0.1, 10], "filter_order": 8, "envelope_extrema_group": 10,
         "bin_minutes": 10, "smoothing_minutes": 30,
         "internal_cycle_minutes": 90, "max_cycles": 4,
         "reference": "https://github.com/marcellosicbaldi/lids-analysis",
         "phase_convention": "offset + amplitude*cos(2*pi*t/period - phase_rad)",
     }, indent=2), encoding="utf-8")
     for night, bins in result["bouts"].items():
+        result["minutes"][night].to_csv(output / f"{night}_minute_activity.csv")
         bins.to_csv(output / f"{night}_lids.csv")
         fig = plot_night(night, bins, result["summary"].loc[night])
         fig.savefig(output / f"{night}_lids.png", dpi=160)
@@ -313,7 +368,7 @@ def save_results(result, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, help="Folder containing nightly SPT crop folders")
-    parser.add_argument("--output", type=Path, default=Path(__file__).parent / "outputs" / "lids")
+    parser.add_argument("--output", type=Path, default=Path(__file__).parent / "outputs" / "lids_envelope")
     parser.add_argument("--fit-method", choices=["projection", "least_squares"], default="projection")
     args = parser.parse_args()
     result = analyze_nights(args.root, LIDSConfig(fit_method=args.fit_method), progress=print)
