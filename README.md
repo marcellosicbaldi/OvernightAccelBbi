@@ -155,6 +155,15 @@ python -m jupyterlab
   night's fitted period. It reads the same SPT-cropped acceleration parquets;
   see [method and usage](offline_processing/LIDS.md) for the envelope adaptation,
   missing-data rules, phase convention, and private outputs.
+- Use [nightly_hr_hrv.ipynb](offline_processing/nightly_hr_hrv.ipynb) for HR and
+  quiet-period HRV across all saved SPT crops. It computes non-overlapping
+  one-minute HR/RMSSD/lnRMSSD and five-minute RMSSD updated every minute, with
+  nightly summaries, heatmaps, onset/wake/SPT-percentage alignments, and early-to-late
+  comparisons. HRV windows cannot cross saved quiet segments or BBI delivery runs;
+  the adjustable interpolation limit defaults to 5%. Quiet-period definitions
+  inherit the original export settings, including ignored short bursts. Set
+  `OVERNIGHT_PROCESSED_ROOT` or edit `ROOT`; private outputs remain under
+  `offline_processing/outputs/nightly_hr_hrv/`. No SDNN is computed.
 - Use [wrist_reorientation_hr.ipynb](offline_processing/wrist_reorientation_hr.ipynb)
   for exploratory wrist-orientation comparisons. This notebook uses HR derived
   from BBI callbacks; the main notebook uses FIT-recorded HR for event responses.
