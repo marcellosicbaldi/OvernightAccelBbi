@@ -80,6 +80,27 @@ def intersect_intervals(intervals, coverage):
     return validate_intervals(pd.DataFrame(pieces, columns=["start", "end"]))
 
 
+def subtract_intervals(intervals, exclusions):
+    """Remove [start, end) exclusions, preserving every remaining boundary."""
+    intervals, exclusions = validate_intervals(intervals), validate_intervals(exclusions)
+    pieces = []
+    for interval in intervals.itertuples(index=False):
+        cursor = interval.start
+        for excluded in exclusions.itertuples(index=False):
+            if excluded.end <= cursor:
+                continue
+            if excluded.start >= interval.end:
+                break
+            if cursor < excluded.start:
+                pieces.append((cursor, excluded.start))
+            cursor = max(cursor, excluded.end)
+            if cursor >= interval.end:
+                break
+        if cursor < interval.end:
+            pieces.append((cursor, interval.end))
+    return validate_intervals(pd.DataFrame(pieces, columns=["start", "end"]))
+
+
 def classify_bursts(bursts, sleep_intervals, wake_intervals):
     """Label entire bursts: ANY counted-wake overlap wins over sleep.
 
