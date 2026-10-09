@@ -5,6 +5,11 @@ The watch's on-screen firmware version is tracked separately.
 
 ## Unreleased
 
+- Recover inconsistent schema 3 BBI snapshots using consistent repeated copies;
+  report skipped snapshots and omit ambiguous intervals as sequence gaps.
+- Publish firmware v1.1.2 schema 4 snapshots in one field containing the total,
+  metadata, intervals, and callback times to prevent mixed field generations.
+- Reload the BBI decoder when rerunning the notebook HRV cell.
 - Adapt the supplied GP_pipeline HRV workflow to Garmin BBIs in the main notebook:
   1-5 minute quiet-period windows, 1-minute steps, single-pass artifact masking
   and linear cleaning, plus mean HR, RMSSD, SDNN, and PIP.

@@ -28,7 +28,7 @@ $compiler = Join-Path $SdkPath 'bin\monkeyc.bat'
 if (!(Test-Path -LiteralPath $compiler)) { throw "Compiler not found: $compiler" }
 if (!(Test-Path -LiteralPath $KeyPath)) { throw "Signing key not found: $KeyPath" }
 $key = (Resolve-Path -LiteralPath $KeyPath).Path
-$kind = if ($Tests) { 'tests' } else { 'v1.1.1' }
+$kind = if ($Tests) { 'tests' } else { 'v1.1.2' }
 $destination = Join-Path $project "bin\$kind"
 $staging = Join-Path $project ('bin\build-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $destination, $staging -Force | Out-Null

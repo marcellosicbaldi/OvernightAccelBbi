@@ -4,15 +4,18 @@ Simple Connect IQ watch app for Instinct 3 AMOLED 45 mm and 50 mm.
 Records accelerometry through Garmin SensorLogger and captures BBI when Garmin
 delivers it. No sleep scoring, staging, GPS, network upload, or raw PPG recording.
 
-## Review status (v1.1.1 source)
+## Review status (v1.1.2 source)
 
 The START crash reported on the 45 mm watch was reproduced in the simulator.
 v1.1 exceeded the runtime developer-field count limit: it tried to create 34 FIT
-fields, and failed at the 17th. v1.1.1 uses 11 total fields (7 RECORD, 4 SESSION),
-packing metadata into arrays. It also checks the count before allocating a field.
+fields, and failed at the 17th. v1.1.1 reduced this to 11 total fields.
+v1.1.2 uses 7 fields (5 RECORD, 2 SESSION) and publishes the BBI total, arrays,
+and metadata together in one snapshot field. Separate v1.1.1 field updates could
+produce partially updated snapshots when Garmin wrote a RECORD during a callback.
+The recorder also checks the count before allocating a field.
 
 Both supported device profiles have previously built successfully. Public releases
-currently distribute source only. Build your own PRG in `bin/v1.1.1/` before
+currently distribute source only. Build your own PRG in `bin/v1.1.2/` before
 following the installation steps below. Run commands from the repository root.
 
 Fixed in the source:
@@ -25,6 +28,7 @@ Fixed in the source:
 - Retain elapsed time and logged sample counts after saving.
 - Explicitly request the heart-rate sensor, and show waiting, absent, or stale BBI.
 - Add bounded, sequence-numbered BBI history and a final SESSION snapshot.
+- Submit each BBI snapshot in one fresh array, with its own total and timestamps.
 - Separate actual FIT accelerometer count from callback diagnostics.
 - MENU no longer stops a recording. UP/DOWN/MENU refresh the display on demand.
   No periodic display-update timer or backlight forcing is used.
@@ -38,6 +42,13 @@ FIT interoperability, display timeout, or overnight battery/storage behavior.
 These properties require device-specific checks; later exploratory recordings
 do not establish general compatibility or physiological validity.
 
+Validation on 2026-10-09: all 7 Monkey C tests pass on both profiles, including
+actual allocation/save of the new fields and snapshot independence across callbacks.
+All 211 Python tests pass. Recovery on a local schema 3 overnight recording
+skips 2,072 inconsistent snapshots and recovers all 21,536 received intervals
+from consistent repeats, with no missing sequences. Schema 4 requires a new
+watch installation and a physical recording to confirm device interoperability.
+
 ## Build the update
 
 Open this project in VS Code and use its ordinary PowerShell terminal:
@@ -49,7 +60,7 @@ Open this project in VS Code and use its ordinary PowerShell terminal:
 This builds both supported sizes using the SDK selected by SDK Manager (or
 `GARMIN_SDK_HOME`) and your `GARMIN_DEVELOPER_KEY` signing key. The script also
 accepts `-SdkPath` and `-KeyPath`; its local fallback key location is
-`$env:USERPROFILE/Downloads/developer_key`. It publishes a PRG to `bin/v1.1.1/`
+`$env:USERPROFILE/Downloads/developer_key`. It publishes a PRG to `bin/v1.1.2/`
 only after that model's compiler invocation succeeds. It does not install anything
 on the watch. Do not substitute a different signing key or change the app ID.
 
@@ -62,7 +73,7 @@ To build just one size:
 The script accepts `-SdkPath` and `-KeyPath` if your local paths have changed.
 Alternatively, run **Monkey C: Build for Device** from the VS Code command palette,
 select your exact Instinct 3 AMOLED model and the existing key, and choose an output
-under `bin/v1.1.1/`. Wait for **BUILD SUCCESSFUL**. If building fails, do not install
+under `bin/v1.1.2/`. Wait for **BUILD SUCCESSFUL**. If building fails, do not install
 an old PRG as though it were the new build; retain the compiler output for review.
 
 ## Update or reinstall on the watch
@@ -71,12 +82,12 @@ an old PRG as though it were the new build; retain the compiler output for revie
 2. Connect the watch to the PC using a USB data cable. In File Explorer open the
    Garmin device, then its internal storage if shown, then `GARMIN/APPS`.
 3. Back up the existing app PRG and any FIT recordings you want to keep to your PC.
-4. Copy ONLY the newly built PRG matching your watch size from `bin/v1.1.1/` into
+4. Copy ONLY the newly built PRG matching your watch size from `bin/v1.1.2/` into
    `GARMIN/APPS`. Use the SAME filename as your previous sideload, for example
    `OvernightAccelBbi.prg`, and replace that app's file. Do not copy both sizes,
    debug XML, JSON, or the entire bin folder. Do not delete unrelated Garmin files.
 5. Disconnect cleanly once copying has finished. Reopen the app on the watch and
-   verify the screen title is **Overnight v1.1.1**. Restart the watch if it still
+   verify the screen title is **Overnight v1.1.2**. Restart the watch if it still
    shows the old app after a completed copy.
 6. If you previously removed the app, the same copy procedure reinstalls it. If
    an old app uses an unfamiliar autogenerated filename, do not guess which PRG
@@ -89,7 +100,7 @@ https://developer.garmin.com/downloads/connect-iq/wearable-programming-for-the-a
 
 ## Five-minute test
 
-1. Charge the watch, verify available storage, wear it normally, and launch v1.1.1.
+1. Charge the watch, verify available storage, wear it normally, and launch v1.1.2.
 2. Press START to record. The status should become **Recording**.
 3. After 30-60 seconds, press UP or DOWN to refresh. **FIT accel** and **Callbacks**
    should increase. If BBI is delivered, **BBI received** should increase too.
@@ -126,7 +137,25 @@ Scalar fields `bbi_count` (ID 0), `bbi_latest` (1), `accel_samples` (10), and
 are no longer written. Use the history decoder for the interval sequence.
 `accel_samples` counts callback samples, not the native FIT samples.
 
-Schema 3 adds these compact RECORD fields:
+Current v1.1.2 recordings use schema 4. `bbi_snapshot` (ID 25, RECORD) and
+`final_bbi_snapshot` (ID 52, SESSION) each contain 56 UINT32 values:
+
+| Indices | Contents |
+| --- | --- |
+| 0 | Schema version (4) |
+| 1 | Total intervals received, authoritative for this snapshot |
+| 2-5 | Callbacks, empty callbacks, invalid intervals, native sample count |
+| 6-7 | Elapsed milliseconds, UTC start anchor in Unix seconds |
+| 8-31 | 24 interval slots, milliseconds (0 marks invalid intervals) |
+| 32-55 | 24 corresponding callback-arrival offsets, milliseconds |
+
+History count is derived as `min(snapshot[1], 24)`. All related information is
+submitted in a single `setData()` call with a fresh array. The decoder uses the
+embedded total; the separate `bbi_total`/`final_bbi_total` scalar is diagnostic
+and can reflect a different callback. The payload is 235 RECORD bytes and 228
+SESSION bytes, within Garmin's 256-byte limit per message.
+
+Older v1.1.1 recordings use schema 3 with these separate RECORD fields:
 
 | ID | Field | Meaning |
 | --- | --- | --- |
@@ -156,7 +185,7 @@ Snapshots reduce overwrite losses but do NOT guarantee losslessness. A gap longe
 than 24 delivered intervals can exceed the retained history. Sequence gaps reveal
 intervals the app received but the FIT did not preserve. They cannot reveal beats
 the sensor never delivered. An empty callback is not proof of a sensor dropout.
-The developer-field record payload is about 5 MB per eight hours at one record per second,
+The schema 4 developer-field record payload is about 6.8 MB per eight hours at one record per second,
 in addition to native accelerometry. Overnight storage/battery use must be measured.
 
 Arrival timestamps are NOT beat timestamps. All intervals in one callback share
@@ -189,12 +218,23 @@ interval_df = pd.DataFrame(rows)
 print(report)
 ```
 
-Inspect `missing_sequence_ranges`, `invalid_recovered_intervals`, and
-`final_summary_present`. A complete received sequence is not proof of physiological
+Inspect `missing_sequence_ranges`, `invalid_recovered_intervals`,
+`skipped_inconsistent_snapshots`, `snapshot_rejections`, `conflicting_sequence_ranges`,
+and `final_snapshot_valid`. A complete received sequence is not proof of physiological
 BBI validity. Identical interval values are never deduplicated by value, only by
 their sequence number. Legacy FIT files are explicitly identified, not reinterpreted
-as numbered snapshots. The decoder supports both older schema 2 snapshots and
-compact schema 3. Do not concatenate snapshots from multiple sessions.
+as numbered snapshots. The decoder supports schemas 2, 3, and 4. Do not
+concatenate snapshots from multiple sessions.
+
+Schema 3 recovery is enabled by default: snapshots with inconsistent counts,
+decreasing callback times in sequence order, or callback times beyond their
+metadata's elapsed time are skipped in full. Repeated consistent snapshots may
+recover those intervals. If remaining copies disagree, that sequence is omitted
+and counted as missing; the decoder never chooses by majority or recency.
+Observed totals from skipped snapshots still contribute to missing-sequence
+reporting. Malformed arrays, unsupported schemas, mixed sessions, and schema 2/4
+inconsistencies still raise errors. For fail-fast schema 3 auditing, use
+`load_bbi(FIT_PATH, strict=True)` or the CLI's `--strict` option.
 
 ## Regression tests
 

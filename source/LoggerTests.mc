@@ -84,7 +84,7 @@ function simulatorSessionSmoke(logger as Test.Logger) as Boolean {
     var r = new OvernightAccelBbiRecorder();
     Test.assertEqualMessage(r.start(), true, "Actual session/field allocation failed");
     Test.assertEqual(r.isRecording(), true);
-    Test.assertEqual(r.getFitFieldCount(), 11);
+    Test.assertEqual(r.getFitFieldCount(), 7);
     Test.assertEqualMessage(r.stopAndSave(), true, "Actual session save failed");
     Test.assertEqual(r.isRecording(), false);
     Test.assertEqual(r.hasSession(), false);
@@ -101,5 +101,23 @@ function renderReadyAndSaveFailure(logger as Test.Logger) as Boolean {
     r.testSetSession(new TestSession());
     Test.assertEqual(r.stopAndSave(), false);
     view.onUpdate(bitmap.getDc());
+    return true;
+}
+
+(:test)
+function packedSnapshotRetainsItsOwnTotalAndSlots(logger as Test.Logger) as Boolean {
+    var r = new OvernightAccelBbiRecorder();
+    var first = r.testSnapshot([1000], 1234);
+    var second = r.testSnapshot([900], 2345);
+    Test.assertEqual(first.size(), 56);
+    Test.assertEqual(first[0], 4);
+    Test.assertEqual(first[1], 1);
+    Test.assertEqual(first[6], 1234);
+    Test.assertEqual(first[8], 1000);
+    Test.assertEqual(first[9], 0);
+    Test.assertEqual(first[32], 1234);
+    Test.assertEqual(second[1], 2);
+    Test.assertEqual(second[9], 900);
+    Test.assertEqual(second[33], 2345);
     return true;
 }

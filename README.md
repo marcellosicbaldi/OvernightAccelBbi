@@ -200,7 +200,7 @@ python offline_processing/fit_bbi.py path/to/recording.fit
 ## Watch app
 
 The current targets are **Garmin Instinct 3 AMOLED 45 mm and 50 mm**, with Connect IQ
-API level 5.1.0 or later. Recorder firmware is **v1.1.1**.
+API level 5.1.0 or later. Recorder firmware is **v1.1.2**.
 
 Install the Garmin Connect IQ SDK and use your own developer signing key. On Windows:
 

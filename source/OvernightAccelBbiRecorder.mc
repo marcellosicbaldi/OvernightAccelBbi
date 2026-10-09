@@ -9,7 +9,7 @@ import Toybox.Time;
 import Toybox.WatchUi;
 
 class OvernightAccelBbiRecorder {
-    const VERSION = "1.1.1";
+    const VERSION = "1.1.2";
     private const CALLBACK_HZ = 25;
     private var _session;
     private var _logger as SensorLogging.SensorLogger?;
@@ -204,39 +204,37 @@ class OvernightAccelBbiRecorder {
         _fields.add(addField("bbi_latest", 1, FitContributor.DATA_TYPE_UINT16, "ms", 1, false));
         _fields.add(addField("accel_samples", 10, FitContributor.DATA_TYPE_UINT32, "samples", 1, false));
         _fields.add(addField("bbi_total", 11, FitContributor.DATA_TYPE_UINT32, "count", 1, false));
-        _fields.add(addField("bbi_history", 13, FitContributor.DATA_TYPE_UINT16, "ms", 24, false));
-        _fields.add(addField("bbi_rx_ms", 14, FitContributor.DATA_TYPE_UINT32, "ms", 24, false));
-        _fields.add(addField("logger_meta", 24, FitContributor.DATA_TYPE_UINT32, "mixed", 8, false));
-        _summaryFields.add(addField("final_bbi_history", 40, FitContributor.DATA_TYPE_UINT16, "ms", 24, true));
-        _summaryFields.add(addField("final_bbi_rx_ms", 41, FitContributor.DATA_TYPE_UINT32, "ms", 24, true));
+        // One field keeps the total, values, times, and metadata together even
+        // when Garmin writes a RECORD between separate setData() calls.
+        _fields.add(addField("bbi_snapshot", 25, FitContributor.DATA_TYPE_UINT32, "mixed", 56, false));
         _summaryFields.add(addField("final_bbi_total", 42, FitContributor.DATA_TYPE_UINT32, "count", 1, true));
-        _summaryFields.add(addField("final_logger_meta", 51, FitContributor.DATA_TYPE_UINT32, "mixed", 8, true));
+        _summaryFields.add(addField("final_bbi_snapshot", 52, FitContributor.DATA_TYPE_UINT32, "mixed", 56, true));
         _fields[0].setData(0);
         _fields[1].setData(0);
     }
 
     private function publishFields() as Void {
-        if (_fields.size() != 7) { return; }
+        if (_fields.size() != 5) { return; }
         _fields[2].setData(_accelSamples);
         _fields[3].setData(_bbi.total);
-        _fields[4].setData(_bbi.values.slice(0, 24));
-        _fields[5].setData(_bbi.receivedMs.slice(0, 24));
-        _fields[6].setData(getMetadata());
+        _fields[4].setData(getSnapshot());
     }
 
     private function publishSummary() as Void {
-        if (_summaryFields.size() != 4) { return; }
-        _summaryFields[0].setData(_bbi.values.slice(0, 24));
-        _summaryFields[1].setData(_bbi.receivedMs.slice(0, 24));
-        _summaryFields[2].setData(_bbi.total);
-        _summaryFields[3].setData(getMetadata());
+        if (_summaryFields.size() != 2) { return; }
+        _summaryFields[0].setData(_bbi.total);
+        _summaryFields[1].setData(getSnapshot());
     }
 
-    private function getMetadata() as Array<Number> {
-        // Schema, history count, callbacks, empty callbacks, invalid intervals,
-        // native sample count, elapsed milliseconds, and Unix-second anchor.
-        return [3, _bbi.count(), _callbackCount, _emptyCallbacks, _bbi.invalidTotal,
+    private function getSnapshot() as Array<Number> {
+        // Schema 4: total replaces history count (which is derived from total),
+        // followed by diagnostics, 24 interval values, and 24 arrival times.
+        // Always allocate a fresh array; later callbacks must not mutate it.
+        var snapshot = [4, _bbi.total, _callbackCount, _emptyCallbacks, _bbi.invalidTotal,
             _loggedSamples, getElapsedMs(), _startUnix];
+        for (var i = 0; i < _bbi.values.size(); i++) { snapshot.add(_bbi.values[i]); }
+        for (var i = 0; i < _bbi.receivedMs.size(); i++) { snapshot.add(_bbi.receivedMs[i]); }
+        return snapshot;
     }
 
     private function updateLoggedSamples() as Void {
@@ -279,4 +277,11 @@ class OvernightAccelBbiRecorder {
 
     (:testHelper)
     function testSetSession(session) as Void { _session = session; }
+
+    (:testHelper)
+    function testSnapshot(intervals, elapsed) as Array<Number> {
+        _bbi.append(intervals, elapsed);
+        _elapsedMs = elapsed;
+        return getSnapshot();
+    }
 }
