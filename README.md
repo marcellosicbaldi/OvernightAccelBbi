@@ -144,11 +144,12 @@ python -m jupyterlab
   recording inspection, diary cropping, bursts, recorded-HR responses, and HRV.
 - Use [batch_raw_export.ipynb](offline_processing/batch_raw_export.ipynb) to export
   all recordings to `garmin_processed_new/<recording>/`. It saves only raw XYZ
-  acceleration cropped from diary `lightsoff` to `gotup`, and the full recording's
+  acceleration cropped from diary `lightsoff` to `wakeup`, and the full recording's
   original BBI snapshot fields, in two Parquet files. Optional previews show raw
   acceleration above BBI with both diary boundaries marked; review can pause
-  before each save. `wakeup` is not required for this export. Existing exports
-  are skipped unless `OVERWRITE=True`; no filtering or HRV analysis is applied.
+  before each save. Set `START_FROM` to a recording filename to start there
+  (inclusive), or use `RECORDING_NAMES` to select individual files. Existing
+  exports are skipped unless `OVERWRITE=True`; no filtering or HRV analysis is applied.
 - Use [across_nights.ipynb](offline_processing/across_nights.ipynb) for one subject's
   processed SPT crops: nightly movement/HR trends, common AUC tertiles, equal-night
   response curves, and burst-level and nightly-average correlations. Set

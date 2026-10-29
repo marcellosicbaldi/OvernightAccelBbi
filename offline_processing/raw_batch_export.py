@@ -20,6 +20,35 @@ _BBI_CONTEXT = {"timestamp", "timestamp_ms", "logger_meta", "logger_schema",
                 "elapsed_ms", "start_unix_s"}
 
 
+def select_recordings(directory, *, start_from=None, recording_names=None):
+    """Select sorted FIT files, including start_from and all later filenames.
+
+    An optional explicit filename list further restricts that range. Validate
+    both selectors against the full folder so a typo never silently selects
+    a different starting point. Filename order does not perform diary matching.
+    """
+    files = sorted((p for p in Path(directory).iterdir()
+                    if p.is_file() and p.suffix.lower() == ".fit"),
+                   key=lambda p: p.name.casefold())
+    names = [p.name.casefold() for p in files]
+    if recording_names is not None:
+        if isinstance(recording_names, str):
+            raise TypeError("RECORDING_NAMES must be a list of filenames, or None")
+        selected = {name.casefold() for name in recording_names}
+        missing = selected - set(names)
+        if missing:
+            raise FileNotFoundError(f"Requested recordings not found: {sorted(missing)}")
+    if start_from is not None:
+        if start_from.casefold() not in names:
+            raise FileNotFoundError(f"START_FROM recording not found: {start_from}")
+        files = files[names.index(start_from.casefold()):]
+    if recording_names is not None:
+        files = [p for p in files if p.name.casefold() in selected]
+    if not files:
+        raise FileNotFoundError(f"No FIT recordings selected in {directory}")
+    return files
+
+
 def read_raw_fit(path):
     """Read once, preserving XYZ values and original record/session BBI fields.
 
@@ -61,8 +90,8 @@ def read_raw_fit(path):
 
 
 def crop_to_diary(accel, diary, timezone="Europe/Rome"):
-    """Match actual UTC coverage to lightsoff -> gotup; retain [start, end)."""
-    required = ["Date", "lightsoff", "gotup"]
+    """Match actual UTC coverage to lightsoff -> wakeup; retain [start, end)."""
+    required = ["Date", "lightsoff", "wakeup"]
     if not set(required).issubset(diary.columns):
         raise ValueError(f"Diary needs columns {required}")
     times = pd.DatetimeIndex(accel["sample_time"])
@@ -73,20 +102,14 @@ def crop_to_diary(accel, diary, timezone="Europe/Rome"):
     if pd.isna(period):
         raise ValueError("Cannot determine the accelerometer sample period")
     start, end = times.min(), times.max() + period
-    # Reuse the established midnight/DST/overlap rules with an explicit gotup
-    # adapter. The workbook's actual wakeup column is never read or changed.
-    matching_diary = diary[required].rename(columns={"gotup": "wakeup"})
-    try:
-        row, skipped = select_sleep_interval(matching_diary, start, end, timezone=timezone)
-    except ValueError as exc:
-        raise ValueError(str(exc).replace("wakeup", "gotup")) from exc
-    lights, gotup = row["lightsoff_at"], row["wakeup_at"]
-    mask = (times >= lights) & (times < gotup)
+    row, skipped = select_sleep_interval(diary[required], start, end, timezone=timezone)
+    lights, wakeup = row["lightsoff_at"], row["wakeup_at"]
+    mask = (times >= lights) & (times < wakeup)
     cropped = accel.loc[mask].reset_index(drop=True)
     if cropped.empty:
         raise ValueError("Matched diary interval contains no accelerometer samples")
     window = {"diary_excel_row": int(row["excel_row"]),
-              "lightsoff": lights, "gotup": gotup,
+              "lightsoff": lights, "wakeup": wakeup,
               "recording_start": start, "recording_end_exclusive": end,
               "full_diary_interval_recorded": bool(row["full_diary_interval_recorded"]),
               "accel_samples_full": len(accel), "accel_samples_saved": len(cropped),
@@ -169,9 +192,9 @@ def plot_raw_preview(accel, raw_bbi, window, title, timezone="Europe/Rome", max_
     axes[1].set_ylabel("BBI (ms)")
     axes[1].set_title(note, fontsize=10)
     for axis in axes:
-        axis.axvspan(window["lightsoff"], window["gotup"], color="teal", alpha=0.08)
+        axis.axvspan(window["lightsoff"], window["wakeup"], color="teal", alpha=0.08)
         axis.axvline(window["lightsoff"], color="green", ls="--", label="Diary lightsoff")
-        axis.axvline(window["gotup"], color="crimson", ls="--", label="Diary gotup")
+        axis.axvline(window["wakeup"], color="crimson", ls="--", label="Diary wakeup")
         axis.grid(alpha=0.25)
     axes[0].legend(loc="upper right", ncol=5)
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%d %b\n%H:%M", tz=ZoneInfo(timezone)))
@@ -188,11 +211,11 @@ def save_raw_tables(output_dir, accel, raw_bbi, window, source, units, overwrite
     targets = [output_dir / name for name in OUTPUT_NAMES]
     if not overwrite and any(path.exists() for path in targets):
         raise FileExistsError(f"Raw export already exists in {output_dir}; set OVERWRITE=True to replace it")
-    metadata = {"export_version": 1, "source_fit": source.name,
+    metadata = {"export_version": 2, "source_fit": source.name,
                 "source_fit_size": source.stat().st_size,
                 "source_fit_mtime_ns": source.stat().st_mtime_ns,
                 "window": window, "fit_acceleration_units": units,
-                "acceleration": "Original FIT scale, cropped to [lightsoff, gotup); no filtering/resampling",
+                "acceleration": "Original FIT scale, cropped to [lightsoff, wakeup); no filtering/resampling",
                 "bbi": "Original record/session snapshots for the FULL recording; no decoding/cleaning"}
     encoded = json.dumps(metadata, default=str).encode("utf-8")
     output_dir.mkdir(parents=True, exist_ok=True)

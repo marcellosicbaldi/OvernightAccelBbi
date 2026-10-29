@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 from fit_bbi import decode_snapshots
 from raw_batch_export import (OUTPUT_NAMES, bbi_preview, crop_to_diary,
                               plot_raw_preview, read_raw_fit, save_raw_tables,
-                              snapshot_messages)
+                              select_recordings, snapshot_messages)
 
 
 class Message:
@@ -33,15 +33,16 @@ class RawBatchExportTests(unittest.TestCase):
         return pd.DataFrame({"sample_time": pd.date_range(start, periods=periods, freq=freq, tz="UTC"),
                              "accel_x": np.arange(periods), "accel_y": 0.0, "accel_z": 1000.0})
 
-    def diary(self, day="2026-10-14", lights=time(23, 30), gotup=time(7)):
+    def diary(self, day="2026-10-14", lights=time(23, 30), wakeup=time(7)):
         return pd.DataFrame({"Date": [pd.Timestamp(day)], "lightsoff": [lights],
-                             "gotup": [gotup], "wakeup": [None], "bedtime": [None]})
+                             "wakeup": [wakeup], "gotup": [time(8)], "bedtime": [None]})
 
-    def test_crop_uses_gotup_not_missing_wakeup_and_excludes_end(self):
+    def test_crop_uses_wakeup_not_later_gotup_and_excludes_end(self):
         accel = self.accel()
         cropped, window = crop_to_diary(accel, self.diary())
         self.assertEqual(cropped.accel_x.tolist(), list(range(1, 8)))
-        self.assertEqual(window["gotup"], pd.Timestamp("2026-10-15 07:00", tz="Europe/Rome"))
+        self.assertEqual(window["wakeup"], pd.Timestamp("2026-10-15 07:00", tz="Europe/Rome"))
+        self.assertNotIn("gotup", window)
         self.assertTrue(window["full_diary_interval_recorded"])
         pd.testing.assert_frame_equal(accel, self.accel())
 
@@ -54,7 +55,7 @@ class RawBatchExportTests(unittest.TestCase):
         accel = self.accel("2026-10-24 21:00", 12)
         cropped, window = crop_to_diary(accel, self.diary("2026-10-24", time(23), time(7)))
         self.assertEqual(len(cropped), 9)
-        self.assertEqual((window["gotup"] - window["lightsoff"]).total_seconds(), 9 * 3600)
+        self.assertEqual((window["wakeup"] - window["lightsoff"]).total_seconds(), 9 * 3600)
         cropped, window = crop_to_diary(self.accel(periods=4), self.diary())
         self.assertFalse(window["full_diary_interval_recorded"])
         self.assertEqual(len(cropped), 3)
@@ -65,8 +66,30 @@ class RawBatchExportTests(unittest.TestCase):
             crop_to_diary(self.accel(), pd.concat([diary, diary], ignore_index=True))
         with self.assertRaisesRegex(ValueError, "No complete"):
             crop_to_diary(self.accel(), self.diary("2026-10-20"))
-        with self.assertRaisesRegex(ValueError, "gotup"):
-            crop_to_diary(self.accel(), diary.drop(columns="gotup"))
+        with self.assertRaisesRegex(ValueError, "wakeup"):
+            crop_to_diary(self.accel(), diary.drop(columns="wakeup"))
+        diary["wakeup"] = None
+        with self.assertRaisesRegex(ValueError, "No complete"):
+            crop_to_diary(self.accel(), diary)
+
+    def test_recording_selection_starts_inclusively_and_keeps_filename_order(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            names = ["2026-01-01-23-00-00.fit", "2026-01-02-23-00-00.FIT", "2026-01-03-23-00-00.fit"]
+            for name in reversed(names):
+                (folder / name).touch()
+            (folder / "notes.txt").touch()
+            (folder / "excluded.fit").mkdir()
+            self.assertEqual([p.name for p in select_recordings(folder)], names)
+            self.assertEqual([p.name for p in select_recordings(folder, start_from=names[1].lower())], names[1:])
+            self.assertEqual([p.name for p in select_recordings(
+                folder, start_from=names[1], recording_names=[names[0], names[2]])], [names[2]])
+            with self.assertRaisesRegex(FileNotFoundError, "START_FROM"):
+                select_recordings(folder, start_from="missing.fit")
+            with self.assertRaisesRegex(FileNotFoundError, "Requested recordings"):
+                select_recordings(folder, recording_names=["missing.fit"])
+            with self.assertRaisesRegex(TypeError, "list"):
+                select_recordings(folder, recording_names=names[0])
 
     def test_loader_preserves_legacy_and_final_raw_arrays_without_decoding(self):
         fields = {"timestamp": pd.Timestamp("2026-10-14 21:00"), "timestamp_ms": 10,
@@ -148,9 +171,12 @@ class RawBatchExportTests(unittest.TestCase):
             pd.testing.assert_frame_equal(pd.read_parquet(paths[0]), cropped)
             self.assertEqual(pd.read_parquet(paths[1]).iloc[0].final_bbi_history.tolist(), [0, 65535, 900])
             # BBI outside the diary window remains in the raw full-recording table.
-            self.assertGreater(pd.read_parquet(paths[1]).timestamp.iloc[0], window["gotup"])
+            self.assertGreater(pd.read_parquet(paths[1]).timestamp.iloc[0], window["wakeup"])
             metadata = json.loads(pq.read_schema(paths[0]).metadata[b"overnight_raw_export"])
             self.assertEqual(metadata["window"]["diary_excel_row"], 2)
+            self.assertEqual(metadata["export_version"], 2)
+            self.assertIn("wakeup", metadata["window"])
+            self.assertNotIn("gotup", metadata["window"])
             self.assertIn("FULL recording", metadata["bbi"])
             before = [p.read_bytes() for p in paths]
             with self.assertRaises(FileExistsError):
@@ -166,7 +192,7 @@ class RawBatchExportTests(unittest.TestCase):
         try:
             self.assertEqual(len(fig.axes), 2)
             for axis in fig.axes:
-                self.assertTrue({"Diary lightsoff", "Diary gotup"}.issubset(
+                self.assertTrue({"Diary lightsoff", "Diary wakeup"}.issubset(
                     {line.get_label() for line in axis.lines}))
         finally:
             plt.close(fig)
