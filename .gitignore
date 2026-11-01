@@ -46,6 +46,22 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Garmin Connect sessions and sync state, including custom output locations
+.garminconnect/
+garmin_tokens.json
+oauth1_token.json
+oauth2_token.json
+*garmin-session*.bin
+.garmin-sync-manifest.json
+.garmin-sync.lock
+.garmin-session.lock
+.staging/
+quarantine/
+.hammock-*.part
+*.download
+*.zip
+*garmin-sync*.log
+
 # Local editor and OS files
 .vscode/
 .idea/

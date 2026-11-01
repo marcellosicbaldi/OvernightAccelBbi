@@ -1,0 +1,5 @@
+# Independent of the notebook/analysis environment; Python 3.12+.
+garminconnect==0.3.20
+fitparse==1.2.0
+numpy>=1.26,<3
+pandas>=2.2,<3

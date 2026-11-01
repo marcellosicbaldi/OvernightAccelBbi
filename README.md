@@ -197,6 +197,16 @@ To inspect BBI recovery without a notebook:
 python offline_processing/fit_bbi.py path/to/recording.fit
 ```
 
+## Download recordings through Garmin Connect (review/testing)
+
+An optional standalone Python workflow downloads **ORIGINAL FIT** activities after
+the phone has synced the watch. It checks raw acceleration and BBI histories,
+quarantines failed recordings, and keeps the original bytes. The recorder and
+offline analysis are unchanged. Cloud preservation requires a real FIT/USB
+comparison before relying on it; a visible activity is insufficient.
+
+See [Windows setup, first five-minute test, and daily scheduled sync](docs/GARMIN_CONNECT_SYNC.md).
+
 ## Watch app
 
 The current targets are **Garmin Instinct 3 AMOLED 45 mm and 50 mm**, with Connect IQ
