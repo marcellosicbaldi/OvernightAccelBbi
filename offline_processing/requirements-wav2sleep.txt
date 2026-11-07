@@ -1,0 +1,3 @@
+# Optional dependencies for the PPG-only hypnodensity cell in polar.ipynb.
+-r requirements-notebooks.txt
+wav2sleep @ git+https://github.com/joncarter1/wav2sleep.git@278e30463c8149c4e6899b8784da492fec695bd9
