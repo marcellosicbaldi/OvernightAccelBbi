@@ -180,6 +180,15 @@ python -m jupyterlab
   to filtered Polar PPG and compares local Integrated Gradients and occlusion
   references while keeping the full-night input. Install the optional
   `offline_processing/requirements-captum.txt`; generated results stay local.
+- Use [polar_quiet_ccf.ipynb](offline_processing/polar_quiet_ccf.ipynb) for Polar
+  beat-to-beat HR and pulse period versus PPG amplitude cross-correlation in
+  buffered interburst periods. It follows the Silvani et al. (2008) 5-minute /
+  1-minute-step, 4 Hz, ±25 s protocol, with unfiltered and zero-phase low-pass
+  comparisons, window QC, equal-quiet-period summaries, CSV exports, and figures.
+  It analyzes the whole recording with sleep explicitly unverified. Configure
+  `verity_sense_path` through the existing local paths file; results stay under
+  `offline_processing/outputs/polar_quiet_ccf/`. PWA is not blood pressure and
+  PPG pulse period is not ECG RR; overlapping windows are not independent.
 - The diary workbook needs `Date`, `lightsoff`, and `wakeup` columns. `Date` is the
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.
