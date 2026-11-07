@@ -175,6 +175,11 @@ python -m jupyterlab
 - Use [wrist_reorientation_hr.ipynb](offline_processing/wrist_reorientation_hr.ipynb)
   for exploratory wrist-orientation comparisons. This notebook uses HR derived
   from BBI callbacks; the main notebook uses FIT-recorded HR for event responses.
+- Use [polar_hypnodensity.ipynb](offline_processing/polar_hypnodensity.ipynb) for
+  experimental PPG-only wav2sleep staging and Captum interpretation. It defaults
+  to filtered Polar PPG and compares local Integrated Gradients and occlusion
+  references while keeping the full-night input. Install the optional
+  `offline_processing/requirements-captum.txt`; generated results stay local.
 - The diary workbook needs `Date`, `lightsoff`, and `wakeup` columns. `Date` is the
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.
