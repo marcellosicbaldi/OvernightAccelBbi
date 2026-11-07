@@ -1,4 +1,4 @@
-"""Synthetic checks for raw Polar PPG input and 30-second hypnodensity timing.
+"""Synthetic checks for Polar PPG input selection and hypnodensity timing.
 
 Install requirements-wav2sleep.txt to run the optional inference-pipeline checks.
 The fake model returns known logits; no checkpoint or recordings are downloaded.
@@ -40,7 +40,7 @@ class RawChannelTests(unittest.TestCase):
 
 @unittest.skipIf(wav2sleep is None, "Optional wav2sleep dependencies are not installed")
 class HypnodensityTimingTests(unittest.TestCase):
-    def run_cell(self, duration_s):
+    def run_cell(self, duration_s, input_source="raw"):
         # A synthetic optical waveform with a large DC offset, crossing midnight.
         t = np.arange(int(duration_s * 50)) / 50
         index = pd.Timestamp("2020-01-01 23:59:40") + pd.to_timedelta(t, unit="s")
@@ -48,6 +48,7 @@ class HypnodensityTimingTests(unittest.TestCase):
         filtered = np.cos(2 * np.pi * 1.2 * t)
         acceleration = pd.DataFrame({"x": t * 0, "y": t * 0 + 1000, "z": t * 0}, index=index)
         original = raw.copy()
+        original_filtered = filtered.copy()
         logits = np.array([1.0, 2.0, -0.5, 0.5], dtype=np.float32)
         captured = {}
 
@@ -61,24 +62,35 @@ class HypnodensityTimingTests(unittest.TestCase):
                 return torch.tensor(logits).reshape(1, 1, 4).repeat(1, 1200, 1)
 
         with TemporaryDirectory() as directory:
+            raw_csv = Path(directory) / "outputs" / "polar_wav2sleep" / "20200101T235940_ppg0_hypnodensity.csv"
+            if input_source == "filtered":
+                raw_csv.parent.mkdir(parents=True)
+                raw_csv.write_text("previous raw result\n", encoding="utf-8")
             namespace = {
                 "np": np, "pd": pd, "plt": plt, "Path": Path, "PROCESSING": Path(directory),
                 "ppg_raw_0": raw, "ppg_filtered": filtered, "acc": acceleration,
             }
             with patch.object(wav2sleep, "load_model", return_value=FakeModel()) as loader, patch.object(plt, "show"):
-                exec(notebook_source("WAV2SLEEP_MODEL_REVISION ="), namespace)
+                source = notebook_source("WAV2SLEEP_MODEL_REVISION =")
+                source = source.replace('WAV2SLEEP_INPUT = "filtered"', f'WAV2SLEEP_INPUT = {input_source!r}', 1)
+                exec(source, namespace)
             self.assertEqual(loader.call_args.args, ("hf://joncarter/wav2sleep",))
             self.assertEqual(loader.call_args.kwargs["revision"], "8b6e46ab3ef6e3945282b81f631933c59db0b205")
             result = namespace["hypnodensity"]
             self.assertTrue(namespace["w2s_output_csv"].exists())
+            self.assertEqual("_filtered" in namespace["w2s_output_csv"].name, input_source == "filtered")
+            if input_source == "filtered":
+                self.assertEqual(raw_csv.read_text(encoding="utf-8"), "previous raw result\n")
             exported = pd.read_csv(namespace["w2s_output_csv"])
             self.assertEqual(len(exported), len(result))
 
         pd.testing.assert_series_equal(raw, original)
+        np.testing.assert_array_equal(filtered, original_filtered)
         self.assertEqual(set(captured), {"PPG"})
         # Independent reference for interpolation, zero-padding, and global z-score.
         target_seconds = np.arange(1, 10 * 3600 * 1024 // 30 + 1) * 30 / 1024
-        expected = np.interp(target_seconds, t, raw.to_numpy(dtype=np.float32), left=0, right=0).astype(np.float32)
+        selected_values = raw.to_numpy(dtype=np.float32) if input_source == "raw" else filtered.astype(np.float32)
+        expected = np.interp(target_seconds, t, selected_values, left=0, right=0).astype(np.float32)
         expected = (expected.astype(np.float64) - expected.mean(dtype=np.float64)) / expected.std(dtype=np.float64, ddof=1)
         np.testing.assert_allclose(captured["PPG"][0], expected, atol=2e-6)
 
@@ -96,6 +108,7 @@ class HypnodensityTimingTests(unittest.TestCase):
         np.testing.assert_array_equal(axes[1].lines[0].get_ydata(), filtered)
         self.assertEqual(len(axes[0].lines), 3)
         self.assertEqual(len(axes[2].collections), 4)
+        self.assertIn(f"{input_source} PPG_0 input", axes[2].get_title())
         plt.close(namespace["fig_hypnodensity"])
         return result
 
@@ -108,6 +121,9 @@ class HypnodensityTimingTests(unittest.TestCase):
         result = self.run_cell(60)
         self.assertEqual(list(result["is_complete_epoch"]), [True, True])
         np.testing.assert_allclose(result["observed_duration_s"], [30, 30])
+
+    def test_filtered_input_reaches_model_and_preserves_raw_result(self):
+        self.run_cell(65, input_source="filtered")
 
 
 if __name__ == "__main__":
