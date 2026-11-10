@@ -189,6 +189,14 @@ python -m jupyterlab
   `verity_sense_path` through the existing local paths file; results stay under
   `offline_processing/outputs/polar_quiet_ccf/`. PWA is not blood pressure and
   PPG pulse period is not ECG RR; overlapping windows are not independent.
+- Use [respiration.ipynb](offline_processing/respiration.ipynb) to compare
+  baseline wander (RIIV), pulse amplitude modulation (RIAV), and pulse-period
+  variation (RIFV) as PPG-derived respiratory signals. It uses the HRV quiet
+  policy (bursts ≥2 s, +1 s guard, 1–5-minute windows), preserves the raw optical
+  baseline, and reports separate waveforms, spectra, rate estimates, quality,
+  and matched-window comparisons. Configure the existing `verity_sense_path`;
+  exports remain under `offline_processing/outputs/respiration/`. Sleep is
+  unverified, and inter-method agreement is not reference respiratory accuracy.
 - The diary workbook needs `Date`, `lightsoff`, and `wakeup` columns. `Date` is the
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.
