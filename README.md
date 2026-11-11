@@ -197,6 +197,11 @@ python -m jupyterlab
   and matched-window comparisons. Configure the existing `verity_sense_path`;
   exports remain under `offline_processing/outputs/respiration/`. Sleep is
   unverified, and inter-method agreement is not reference respiratory accuracy.
+  A fourth estimate, `RIIV_direct`, low-pass filters native raw PPG with a
+  window-specific cutoff below its estimated cardiac frequency. It records HR,
+  cutoff and cardiac-attenuation diagnostics and compares direct filtering with
+  the original feature methods. Outputs use the `_hrv_quiet_direct` suffix;
+  overlapping windows retain their own filtered waveforms and cutoffs.
 - The diary workbook needs `Date`, `lightsoff`, and `wakeup` columns. `Date` is the
   date of lights off, including after-midnight entries. The interval is time in
   bed, not independently confirmed sleep.

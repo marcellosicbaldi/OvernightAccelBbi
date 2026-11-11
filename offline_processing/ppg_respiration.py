@@ -18,7 +18,7 @@ from polar_ccf import CCFConfig, extract_beats, sensor_clock_index, union_durati
 METHODS = ("RIIV", "RIAV", "RIFV")
 LABELS = {"RIIV": "Baseline wander", "RIAV": "Pulse amplitude", "RIFV": "Pulse period / RSA proxy"}
 TIME_COLUMNS = {"RIIV": "pwa_time", "RIAV": "pwa_time", "RIFV": "pp_time"}
-COLORS = {"RIIV": "tab:blue", "RIAV": "tab:orange", "RIFV": "tab:green"}
+COLORS = {"RIIV": "tab:blue", "RIAV": "tab:orange", "RIFV": "tab:green", "RIIV_direct": "tab:purple"}
 
 
 @dataclass(frozen=True)
@@ -386,7 +386,7 @@ def analyze_respiration(ppg, quiet, config=RespirationConfig(), feature_extracto
 
 def respiration_availability(result):
     rows = []
-    for method in METHODS:
+    for method in result.get("methods", METHODS):
         windows = result["windows"].loc[result["windows"].method == method]
         included = windows.loc[windows.included]
         period_rates = result["period_rates"].loc[result["period_rates"].method == method]

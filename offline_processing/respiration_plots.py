@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from ppg_respiration import COLORS, LABELS, METHODS
+from direct_riiv import DIRECT_METHOD
 
 
 def representative_window(result, window_id=None):
@@ -36,7 +37,7 @@ def plot_recording(detection, result):
     for run_id, run in result["signals"].groupby("signal_run_id"):
         axes[1].plot([run.time.iloc[0], run.time.iloc[-1]], [.3 + .3 * (run_id % 2)] * 2,
                      color="tab:green", lw=3)
-    for method in METHODS:
+    for method in result.get("methods", METHODS):
         part = result["windows"].loc[(result["windows"].method == method) & result["windows"].included]
         axes[2].scatter(part.start + (part.end - part.start) / 2, part.rate_bpm,
                         s=14, alpha=.65, color=COLORS[method], label=method)
@@ -45,7 +46,7 @@ def plot_recording(detection, result):
                 title="Blue: HRV quiet periods ≥minimum; green: continuous support after pulse QC / filter-edge trimming")
     axes[2].set(ylabel="Estimated breaths/min", xlabel="Polar sensor clock (declared UTC)",
                 title="Quality-screened window estimates; methods may have different coverage")
-    axes[2].legend(ncol=3)
+    axes[2].legend(ncol=len(result.get("methods", METHODS)))
     fig.tight_layout()
     return fig
 
@@ -73,10 +74,12 @@ def plot_example(raw_ppg, result, selected=None):
     axes[0].legend(ncol=4, fontsize=9)
     data = result["signals"]
     window = data.loc[(data.signal_run_id == row.signal_run_id) & (data.time >= row.start) & (data.time < row.end)]
-    seconds = (window.time - row.start).dt.total_seconds()
-    for method in METHODS:
+    for method in result.get("methods", METHODS):
+        method_window = (result["direct_signals"].loc[result["direct_signals"].window_id == row.window_id]
+                         if method == DIRECT_METHOD else window)
+        seconds = (method_window.time - row.start).dt.total_seconds()
         for ax, suffix in ((axes[1], "_raw"), (axes[2], "_resp")):
-            values = window[method + suffix]
+            values = method_window[method + suffix]
             sd = values.std(ddof=0)
             if sd > 0:
                 ax.plot(seconds, (values - values.mean()) / sd, color=COLORS[method], lw=.9, label=method)
@@ -87,7 +90,7 @@ def plot_example(raw_ppg, result, selected=None):
             metrics = selected.loc[selected.method == method].iloc[0]
             label = f"{method}: {metrics.candidate_rate_bpm:.1f}/min" + ("" if metrics.included else " (QC rejected)")
             axes[3].plot(spectrum.frequency_hz * 60, spectrum.power / area, color=COLORS[method], label=label)
-    axes[1].set(title="Beat-derived modulations before respiratory filtering; separately standardized",
+    axes[1].set(title="Modulations before final respiratory bandpass; separately standardized (direct RIIV already low-pass filtered)",
                 ylabel="Unfiltered (z)", xlabel="Seconds within window")
     axes[2].set(title="Respiratory bandpass; zero phase — polarity/phase do not label inspiration",
                 ylabel="Respiratory surrogate (z)", xlabel="Seconds within window")
@@ -128,7 +131,9 @@ def plot_waveforms(result, quiet_period_id=None, max_minutes=10):
 def plot_comparison(result):
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
     common = result["comparison"].loc[result["comparison"].all_methods_included]
-    for col, (a, b) in enumerate((("RIIV", "RIAV"), ("RIIV", "RIFV"), ("RIAV", "RIFV"))):
+    pairs = ([(DIRECT_METHOD, method) for method in METHODS] if DIRECT_METHOD in result.get("methods", ())
+             else [("RIIV", "RIAV"), ("RIIV", "RIFV"), ("RIAV", "RIFV")])
+    for col, (a, b) in enumerate(pairs):
         axes[0, col].scatter(common[a], common[b], s=20, alpha=.65)
         limits = np.asarray(result["config"]["respiratory_band_hz"]) * 60
         axes[0, col].plot(limits, limits, "--", color=".5", lw=.8)
@@ -136,6 +141,55 @@ def plot_comparison(result):
         axes[1, col].scatter((common[a] + common[b]) / 2, common[b] - common[a], s=20, alpha=.65)
         axes[1, col].axhline(0, color=".5", lw=.8)
         axes[1, col].set(xlabel="Mean estimated breaths/min", ylabel=f"{b} − {a} breaths/min")
-    fig.suptitle("Matched windows passing all three methods; descriptive agreement, no reference accuracy or independent-window inference")
+    fig.suptitle("Matched windows passing all configured methods; descriptive agreement, no reference accuracy or independent-window inference")
+    fig.tight_layout()
+    return fig
+
+
+def plot_direct_filter(raw_ppg, result, selected=None):
+    """Inspect raw filtering, the two RIIV waveforms and cardiac suppression."""
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+    selected = representative_window(result) if selected is None else selected
+    metrics = (pd.DataFrame() if selected is None else selected.loc[selected.method == DIRECT_METHOD])
+    if metrics.empty or pd.isna(metrics.lowpass_cutoff_hz.iloc[0]):
+        axes[0].text(.5, .5, "No direct-RIIV filter available", ha="center", transform=axes[0].transAxes)
+        fig.tight_layout()
+        return fig
+    row = metrics.iloc[0]
+    direct = result["direct_signals"].loc[result["direct_signals"].window_id == row.window_id]
+    end_preview = min(row.end, row.start + pd.Timedelta(seconds=60))
+    raw = raw_ppg.loc[row.start:end_preview] * result["config"]["polarity"] - row.raw_optical_offset_removed
+    preview = direct.loc[direct.time <= end_preview]
+    axes[0].plot((raw.index - row.start).total_seconds(), raw, color=".7", lw=.6, label="Raw PPG, context mean removed")
+    axes[0].plot((preview.time - row.start).dt.total_seconds(), preview.RIIV_direct_raw,
+                 color=COLORS[DIRECT_METHOD], lw=1.3, label="HR-adaptive low-pass output")
+    axes[0].set(ylabel="Optical units", xlabel="Seconds within window", title=(
+        f"Window {row.window_id}: reference HR {row.hr_filter_reference_bpm:.1f} bpm; "
+        f"low-pass cutoff {row.lowpass_cutoff_hz:.3f} Hz; theoretical cardiac attenuation {row.cardiac_attenuation_db_theoretical:.1f} dB"))
+    axes[0].legend()
+    features = result["signals"]
+    features = features.loc[(features.signal_run_id == row.signal_run_id)
+                            & (features.time >= row.start) & (features.time < row.end)]
+    for frame, name in ((features, "RIIV"), (direct, DIRECT_METHOD)):
+        y = frame[name + "_resp"]
+        sd = y.std(ddof=0)
+        if sd > 0:
+            axes[1].plot((frame.time - row.start).dt.total_seconds(), (y - y.mean()) / sd,
+                         label=name, color=COLORS[name], lw=1)
+    axes[1].set(ylabel="Respiratory waveform (z)", xlabel="Seconds within window",
+                title="Feature midline RIIV versus direct-filter RIIV, on the same window")
+    axes[1].legend()
+    spectrum = result["direct_native_spectra"].loc[result["direct_native_spectra"].window_id == row.window_id]
+    axes[2].semilogy(spectrum.frequency_hz, spectrum.raw_power.clip(lower=1e-15), color=".5", label="Raw PPG")
+    axes[2].semilogy(spectrum.frequency_hz, spectrum.lowpass_power.clip(lower=1e-15),
+                     color=COLORS[DIRECT_METHOD], label="Adaptive low-pass PPG")
+    axes[2].axvline(row.lowpass_cutoff_hz, ls="--", color=COLORS[DIRECT_METHOD], label="Low-pass cutoff")
+    axes[2].axvline(row.hr_filter_reference_bpm / 60, ls=":", color="k", label="Cardiac reference frequency")
+    low, high = result["config"]["respiratory_band_hz"]
+    axes[2].axvspan(low, high, alpha=.1, color="tab:blue", label="Respiratory search band")
+    axes[2].set(xlabel="Frequency (Hz)", ylabel="PPG PSD (optical units²/Hz)",
+                xlim=(0, max(high * 1.5, min(3, row.hr_filter_reference_bpm / 30))),
+                title="Native-rate spectra before downsampling; theoretical attenuation is not a measured artifact-removal guarantee")
+    axes[2].legend(ncol=2)
     fig.tight_layout()
     return fig
