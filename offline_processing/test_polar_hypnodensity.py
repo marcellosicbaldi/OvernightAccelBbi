@@ -40,9 +40,9 @@ class RawChannelTests(unittest.TestCase):
 
 @unittest.skipIf(wav2sleep is None, "Optional wav2sleep dependencies are not installed")
 class HypnodensityTimingTests(unittest.TestCase):
-    def run_cell(self, duration_s, input_source="raw"):
+    def run_cell(self, duration_s, input_source="raw", sampling_rate=50):
         # A synthetic optical waveform with a large DC offset, crossing midnight.
-        t = np.arange(int(duration_s * 50)) / 50
+        t = np.arange(int(duration_s * sampling_rate)) / sampling_rate
         index = pd.Timestamp("2020-01-01 23:59:40") + pd.to_timedelta(t, unit="s")
         raw = pd.Series(-100_000 + 300 * np.sin(2 * np.pi * 1.2 * t), index=index, name="PPG_0")
         filtered = np.cos(2 * np.pi * 1.2 * t)
@@ -87,25 +87,32 @@ class HypnodensityTimingTests(unittest.TestCase):
         pd.testing.assert_series_equal(raw, original)
         np.testing.assert_array_equal(filtered, original_filtered)
         self.assertEqual(set(captured), {"PPG"})
+        retained_duration = min(duration_s, 10 * 3600)
+        retained = t <= retained_duration
+        self.assertEqual(len(namespace["w2s_frame"]), int(retained.sum()))
+        self.assertLessEqual(namespace["w2s_frame"].index[-1], retained_duration)
         # Independent reference for interpolation, zero-padding, and global z-score.
         target_seconds = np.arange(1, 10 * 3600 * 1024 // 30 + 1) * 30 / 1024
         selected_values = raw.to_numpy(dtype=np.float32) if input_source == "raw" else filtered.astype(np.float32)
-        expected = np.interp(target_seconds, t, selected_values, left=0, right=0).astype(np.float32)
+        expected = np.interp(target_seconds, t[retained], selected_values[retained], left=0, right=0).astype(np.float32)
         expected = (expected.astype(np.float64) - expected.mean(dtype=np.float64)) / expected.std(dtype=np.float64, ddof=1)
-        np.testing.assert_allclose(captured["PPG"][0], expected, atol=2e-6)
+        # Allow float32 reduction roundoff for a full night with a large optical DC offset.
+        np.testing.assert_allclose(captured["PPG"][0], expected, atol=5e-6)
 
         stages = ["Wake", "Light", "Deep", "REM"]
         expected_probability = np.exp(logits.astype(np.float64))
         expected_probability /= expected_probability.sum()
         np.testing.assert_allclose(result[stages], np.tile(expected_probability, (len(result), 1)), atol=1e-7)
         self.assertEqual(result.index[0], index[0])
-        self.assertEqual(result["observed_end"].iloc[-1], index[0] + pd.Timedelta(seconds=duration_s))
-        self.assertEqual(len(result), int(np.ceil(duration_s / 30)))
+        self.assertEqual(result["observed_end"].iloc[-1], index[0] + pd.Timedelta(seconds=retained_duration))
+        self.assertEqual(len(result), int(np.ceil(retained_duration / 30)))
         self.assertTrue((np.diff(result.index.asi8) == 30_000_000_000).all())
 
         axes = namespace["axes_hypnodensity"]
         self.assertTrue(all(axes[0].get_shared_x_axes().joined(axes[0], ax) for ax in axes[1:]))
-        np.testing.assert_array_equal(axes[1].lines[0].get_ydata(), filtered)
+        np.testing.assert_array_equal(axes[1].lines[0].get_ydata(), filtered[retained])
+        self.assertEqual(len(axes[0].lines[0].get_xdata()), int(retained.sum()))
+        self.assertLessEqual(pd.DatetimeIndex(axes[0].lines[0].get_xdata()).max(), result["observed_end"].iloc[-1])
         self.assertEqual(len(axes[0].lines), 3)
         self.assertEqual(len(axes[2].collections), 4)
         self.assertIn(f"{input_source} PPG_0 input", axes[2].get_title())
@@ -124,6 +131,21 @@ class HypnodensityTimingTests(unittest.TestCase):
 
     def test_filtered_input_reaches_model_and_preserves_raw_result(self):
         self.run_cell(65, input_source="filtered")
+
+    def test_raw_recording_over_ten_hours_discards_final_minutes(self):
+        result = self.run_cell(10 * 3600 + 65, sampling_rate=4)
+        self.assertEqual(len(result), 1200)
+        self.assertTrue(result["is_complete_epoch"].all())
+
+    def test_filtered_recording_over_ten_hours_discards_final_hours(self):
+        result = self.run_cell(11 * 3600 + 65, input_source="filtered", sampling_rate=4)
+        self.assertEqual(len(result), 1200)
+        self.assertTrue(result["is_complete_epoch"].all())
+
+    def test_exact_ten_hour_recording_keeps_all_samples(self):
+        result = self.run_cell(10 * 3600, sampling_rate=4)
+        self.assertEqual(len(result), 1200)
+        self.assertTrue(result["is_complete_epoch"].all())
 
 
 if __name__ == "__main__":
