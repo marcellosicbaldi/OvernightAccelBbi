@@ -1,5 +1,6 @@
 {
   "fit_path": "data/recording.fit",
   "reorientation_fit_path": "data/recording.fit",
-  "diary_path": "data/diary.xlsx"
+  "diary_path": "data/diary.xlsx",
+  "night_data_export_path": "data/night_data_export/"
 }

@@ -17,6 +17,7 @@ def input_path(name):
         "reorientation_fit_path": "data/recording.fit",
         "diary_path": "data/diary.xlsx",
         "verity_sense_path": "data/verity_sense/",
+        "night_data_export_path": "data/night_data_export/",
     }
     if name not in defaults:
         raise ValueError(f"Unknown notebook input: {name}")

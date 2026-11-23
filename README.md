@@ -232,6 +232,23 @@ To inspect BBI recovery without a notebook:
 python offline_processing/fit_bbi.py path/to/recording.fit
 ```
 
+To compare nightly H10 ECG, Verity Sense PPG, and EmbracePlus PPG exports, open
+[`nightly_signals.ipynb`](offline_processing/nightly_signals.ipynb), or run:
+
+```sh
+python -m pip install -r offline_processing/requirements-notebooks.txt
+python offline_processing/nightly_signals.py path/to/night_data_export
+```
+
+This opens one **Qt5Agg** window per diary-defined night, with three subplots on
+shared local-time axes. Diary windows and timestamp timezones come from the
+Parquet export metadata. Missing sensor recordings are labeled; gaps remain
+visible. Values retain their exported units. Overview drawing keeps block minima
+and maxima, and zooming redraws from the original samples. Add `--save-dir` with
+a local output directory to also save overview PNGs. For the notebook, configure
+`night_data_export_path` in the ignored `offline_processing/paths.local.json`
+or set `OVERNIGHT_NIGHT_DATA_EXPORT_PATH`.
+
 ## Watch app
 
 The current targets are **Garmin Instinct 3 AMOLED 45 mm and 50 mm**, with Connect IQ
